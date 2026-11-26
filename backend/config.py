@@ -39,12 +39,33 @@ def analysis_retention_days() -> int:
     return days
 
 
+def macro_validity_minutes() -> int:
+    try:
+        minutes = int(os.getenv("MACRO_VALIDITY_MINUTES", "15"))
+    except ValueError as exc:
+        raise ValueError("MACRO_VALIDITY_MINUTES must be an integer") from exc
+    if not 1 <= minutes <= 1440:
+        raise ValueError("MACRO_VALIDITY_MINUTES must be between 1 and 1440")
+    return minutes
+
+
+def market_snapshot_max_age_seconds() -> int:
+    try:
+        seconds = int(os.getenv("MARKET_SNAPSHOT_MAX_AGE_SECONDS", "30"))
+    except ValueError as exc:
+        raise ValueError("MARKET_SNAPSHOT_MAX_AGE_SECONDS must be an integer") from exc
+    if not 1 <= seconds <= 300:
+        raise ValueError("MARKET_SNAPSHOT_MAX_AGE_SECONDS must be between 1 and 300")
+    return seconds
+
+
 def openrouter_model(agent: str = "decision") -> str:
     """Return the configured OpenRouter model for an analysis agent.
 
     OPENROUTER_MODEL remains a compatibility fallback for existing installs.
     """
     setting_by_agent = {
+        "news_analysis": "OPENROUTER_MODEL_NEWS_ANALYSIS",
         "technical_interpretation": "OPENROUTER_MODEL_TECHNICAL_INTERPRETATION",
         "decision": "OPENROUTER_MODEL_DECISION",
     }
@@ -52,12 +73,15 @@ def openrouter_model(agent: str = "decision") -> str:
         setting_name = setting_by_agent[agent]
     except KeyError as exc:
         raise ValueError(f"Unknown OpenRouter agent: {agent}") from exc
-    return os.getenv(setting_name, "").strip() or os.getenv("OPENROUTER_MODEL", "").strip()
+    configured = os.getenv(setting_name, "").strip()
+    if agent == "news_analysis" and not configured:
+        configured = os.getenv("OPENROUTER_MODEL_TECHNICAL_INTERPRETATION", "").strip()
+    return configured or os.getenv("OPENROUTER_MODEL", "").strip()
 
 
 def openrouter_timeout_seconds() -> float:
     try:
-        timeout = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "20"))
+        timeout = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
     except ValueError as exc:
         raise ValueError("OPENROUTER_TIMEOUT_SECONDS must be a number") from exc
     if not 0.5 <= timeout <= 120:

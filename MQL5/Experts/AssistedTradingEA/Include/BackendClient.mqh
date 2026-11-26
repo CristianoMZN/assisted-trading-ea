@@ -6,8 +6,21 @@
 
 datetime ParseUtcIso8601(const string value)
   {
-   if(StringLen(value) != 20 || StringSubstr(value, 10, 1) != "T" || StringSubstr(value, 19, 1) != "Z")
+   int length = StringLen(value);
+   if(length < 20 || StringSubstr(value, 10, 1) != "T" || StringSubstr(value, length - 1, 1) != "Z")
       return 0;
+   if(length > 20)
+     {
+      // Python ISO timestamps may include fractional seconds before the UTC suffix.
+      if(length < 22 || StringSubstr(value, 19, 1) != ".")
+         return 0;
+      for(int i = 20; i < length - 1; i++)
+        {
+         ushort digit = StringGetCharacter(value, i);
+         if(digit < 48 || digit > 57)
+            return 0;
+        }
+     }
    string date_part = StringSubstr(value, 0, 10);
    StringReplace(date_part, "-", ".");
    string time_part = StringSubstr(value, 11, 8);
@@ -58,7 +71,7 @@ bool ValidateSourceBlocks(const JsonToken &tokens[], int root, datetime now,
       if(type == "technical") technical_found = true;
       else if(type == "news") news_found = true;
       else if(type == "prediction_market") market_found = true;
-      else
+      else if(type != "macroeconomic_news")
         {
          error = "Tipo de fonte desconhecido: " + type;
          return false;
@@ -66,8 +79,11 @@ bool ValidateSourceBlocks(const JsonToken &tokens[], int root, datetime now,
       bool not_relevant = (type == "prediction_market" && status == "not_relevant");
       bool informative_absence = ((type == "news" &&
                                    (status == "available" || status == "empty" || status == "unavailable" || status == "not_configured")) ||
+                                  (type == "macroeconomic_news" &&
+                                   (status == "available" || status == "no_relevant_news" || status == "unavailable")) ||
                                   (type == "technical" && status == "insufficient"));
-      if(status != "valid" && !not_relevant && !informative_absence)
+      if((type == "macroeconomic_news" && !informative_absence) ||
+         (status != "valid" && !not_relevant && !informative_absence))
         {
          error = "Fonte " + type + " inválida ou desatualizada: " + status;
          return false;

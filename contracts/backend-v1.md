@@ -1,6 +1,6 @@
 # Contrato EA ↔ backend Python, versão 1
 
-O EA faz `POST` periódico para `POST /v1/analyze` no backend Python/FastAPI configurado pelo cliente, com intervalo selecionável de 1 a 5 minutos. Não faz polling quando já existe posição aberta no símbolo. O backend deste repositório valida a requisição, calcula indicadores, coleta feeds RSS/Atom configurados, consulta OpenRouter e aplica validações determinísticas de risco. Mensagens usam UTF-8 e timestamps ISO 8601 em UTC. Versão desconhecida, corpo inválido ou resposta vencida sempre resulta em sem sinal.
+O EA faz `POST` periódico para `POST /v1/analyze` no backend Python/FastAPI configurado pelo cliente, com intervalo selecionável de 1 a 5 minutos. Não faz polling quando já existe posição aberta no símbolo. O backend valida a requisição, calcula indicadores, lê o contexto macro previamente salvo para o mesmo instrumento, consulta os modelos técnico e de decisão e aplica validações determinísticas de risco. A requisição não coleta RSS nem pesquisa a web. Mensagens usam UTF-8 e timestamps ISO 8601 em UTC. Versão desconhecida, corpo inválido ou resposta vencida sempre resulta em sem sinal.
 
 ## Requisição `market_snapshot`
 
@@ -25,12 +25,16 @@ O período de sete dias é de calendário. Fechamentos de mercado e fins de sema
 ## Resposta `analysis_response`
 
 - `schema_version`: exatamente `1.1`; `message_type`: `analysis_response`; `request_id`: igual ao pedido.
-- `created_at` e `expires_at`: timestamps UTC; a resposta só é acionável enquanto `now < expires_at`.
+- `created_at` e `expires_at`: timestamps UTC definidos ao concluir a análise; a resposta só é acionável enquanto `now < expires_at`. O prazo acionável não ultrapassa a validade do snapshot, da cotação, do contexto macro ou a janela de um minuto da resposta.
 - `instrument`: deve corresponder ao pedido.
 - `status`: `actionable` ou `no_signal`; indisponibilidade operacional é devolvida como envelope HTTP `error` (por exemplo, HTTP 503), não como decisão.
 - `decision`: objeto para `actionable`, `null` para `no_signal`. Deve conter `direction` (`BUY`/`SELL`), `entry_type` (`MARKET`), preço de referência, `stop_loss`, `take_profit`, `risk_reward` (`1:2`/`1:3`), `scenario` e `confidence` (`low`/`medium`/`high`). O backend decide todos esses valores, exceto quantidade, que o cliente ajusta no EA.
 - `reason_code` e `reason`: obrigatórios em `no_signal`, ambos `null` em `actionable`. `reason_code` é um identificador estável em `snake_case`; `reason` é uma explicação operacional curta e não contém raciocínio privado do modelo.
-- `sources`: lista de blocos do backend (`technical`, `news`, `prediction_market`) com `status`, `source`, `observed_at`, `valid_until` e `summary`; campos sem fonte/horário confiável não podem ser usados como evidência validada. Mercado ausente usa `not_relevant`, sem probabilidade inventada.
+- `sources`: lista de blocos (`technical`, `news`, `macroeconomic_news`) com `status`, `source`, `observed_at`, `valid_until` e `summary`; campos sem fonte/horário confiável não podem ser usados como evidência validada. `macroeconomic_news` conserva `cache_id`, instrumento, itens, modelo, versão do prompt e horários originais da pesquisa. Blocos `news` conservam o estado de cada feed RSS, inclusive `unavailable`, distinto de `no_relevant_news` da pesquisa macro.
+
+Para snapshot tecnicamente suficiente sem contexto macro atual do mesmo instrumento, a API retorna HTTP 503 no envelope de erro 1.1, com `error.code: macro_context_unavailable`, `request_id` e nenhum campo `decision`. Dados técnicos insuficientes retornam HTTP 200 `no_signal` com `reason_code: insufficient_market_data`. Se `sent_at`, a cotação ou o contexto macro vencerem antes ou durante os modelos, a resposta é HTTP 200 `no_signal`, `reason_code: stale_market_snapshot`, sem preços acionáveis. O limite inicial de idade de `sent_at` e `current_quote.timestamp` é 30 segundos, configurável em `MARKET_SNAPSHOT_MAX_AGE_SECONDS`.
+
+O backend persiste as evidências e versões macro, técnica e decisão vinculadas ao `cache_id` em `analyses.macro_execution_id`. Registra durações de indicadores, leitura do cache, modelos e persistência em milissegundos no log local, sem credenciais ou respostas brutas do provedor.
 
 O EA verifica envelope, validade, símbolo, direção, preços e relação risco-retorno dentro de um tick do símbolo. Relação 1:2 significa distância entrada-stop : entrada-alvo = 1:2; 1:3 significa 1:3, com orientação compatível com compra/venda. O EA não recalcula a decisão. Correlação da resposta é feita por `request_id`.
 

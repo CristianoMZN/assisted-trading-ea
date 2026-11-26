@@ -39,12 +39,14 @@ class MqlNoSignalContractTests(unittest.TestCase):
         panel = (EA / "Include/Panel.mqh").read_text(encoding="utf-8")
         self.assertIn("IsStableReasonCode(analysis.reason_code)", client)
         self.assertIn('status == "empty" || status == "unavailable" || status == "not_configured"', client)
+        self.assertIn('type == "macroeconomic_news"', client)
+        self.assertIn('status == "available" || status == "no_relevant_news" || status == "unavailable"', client)
         self.assertIn("analysis.valid = true;", client)
         self.assertIn("analysis.actionable = false;", client)
         self.assertIn("analysis.reason_code", panel)
         self.assertIn("analysis.reason", panel)
         self.assertIn("ZeroMemory(g_analysis);", source)
-        self.assertIn('RecordEvent("response_rejected"', source)
+        self.assertIn('manual ? "manual_response_rejected" : "response_rejected"', source)
 
 
 class MqlDailyRiskTests(unittest.TestCase):

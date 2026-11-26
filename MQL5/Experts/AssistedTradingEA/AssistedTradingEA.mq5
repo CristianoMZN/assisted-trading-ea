@@ -18,6 +18,8 @@ string g_last_request_id = "";
 bool g_automation_enabled = false;
 bool g_execution_blocked = false;
 bool g_execution_pending = false;
+bool g_analysis_in_progress = false;
+bool g_manual_execution_pending = false;
 ulong g_pending_order_ticket = 0;
 ulong g_pending_deal_ticket = 0;
 string g_execution_lock_name = "";
@@ -270,13 +272,27 @@ void UpdatePanel()
      {
       g_analysis.valid = false;
       g_analysis.actionable = false;
-      g_status = "Análise vencida · sem sinal atual";
+      g_status = "Análise expirada · solicite uma nova análise";
      }
    bool position_open = (StringLen(g_symbol) > 0 && (HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol)));
    PanelUpdate(g_symbol, g_status, g_analysis, g_automation_enabled, g_poll_interval_minutes,
                g_contracts, position_open, g_execution_blocked,
                g_daily_realized_pnl, g_daily_floating_pnl, g_daily_total_pnl,
-               g_daily_loss_limit, g_daily_limit_reached, g_daily_close_failure);
+               g_daily_loss_limit, g_daily_limit_reached, g_daily_close_failure,
+               g_analysis_in_progress, g_execution_pending,
+               (!InpUseFixture && StringLen(InpBackendUrl) > 0 && !g_daily_limit_reached));
+  }
+
+void InvalidateAnalysisForChangedSettings()
+  {
+   if(g_execution_pending)
+     {
+      // Preserve request_id and expected SL/TP for OnTradeTransaction.
+      g_analysis.valid = false;
+      g_analysis.actionable = false;
+     }
+   else
+      ZeroMemory(g_analysis);
   }
 
 void BuildFixtureAnalysis()
@@ -324,9 +340,142 @@ void BuildFixtureAnalysis()
    g_status = "FIXTURE DE TESTE · nenhuma ordem será enviada";
   }
 
-void HandleAnalysisCycle()
+bool ApplyCurrentAnalysis(const bool manual)
   {
-   if(!g_automation_enabled)
+   string source = (manual ? "manual" : "automatic");
+   if(manual && (g_automation_enabled || g_analysis_in_progress || g_execution_pending ||
+                 g_execution_blocked || g_daily_limit_reached || HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol)))
+     {
+      g_status = (g_daily_limit_reached ? "Aplicação manual bloqueada: limite diário atingido" :
+                  "Aplicação manual bloqueada: automação, exposição ou execução pendente");
+      RecordEvent("manual_apply_blocked", g_analysis.request_id, g_status);
+      UpdatePanel();
+      return false;
+     }
+   if(TimeGMT() >= g_analysis.expires_at)
+     {
+      g_status = "Aplicação bloqueada: recomendação expirada; solicite uma nova análise";
+      if(manual) RecordEvent("manual_apply_blocked", g_analysis.request_id, g_status);
+      UpdatePanel();
+      return false;
+     }
+   if(!g_analysis.valid || !g_analysis.actionable || g_analysis.fixture || g_analysis.symbol != g_symbol ||
+      g_analysis.request_id == "")
+     {
+      g_status = (!g_analysis.valid || !g_analysis.actionable ? "Aplicação bloqueada: recomendação sem sinal ou inválida" :
+                  "Aplicação bloqueada: símbolo da recomendação mudou ou identificador ausente");
+      if(manual)
+         RecordEvent("manual_apply_blocked", g_analysis.request_id, g_status);
+      UpdatePanel();
+      return false;
+     }
+   if(manual && !RecordEvent("manual_apply_requested", g_analysis.request_id,
+                             StringFormat("direction=%s; volume=%s; SL=%s; TP=%s; rr=%s",
+                                          g_analysis.direction, DoubleToString(g_contracts, 4),
+                                          DoubleToString(g_analysis.stop_loss, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
+                                          DoubleToString(g_analysis.take_profit, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
+                                          g_analysis.risk_reward)))
+     {
+      UpdatePanel();
+      return false;
+     }
+   if(HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol))
+     {
+      g_status = "Posição/ordem ativa; recomendação não aplicada";
+      if(manual) RecordEvent("manual_apply_blocked", g_analysis.request_id, g_status);
+      UpdatePanel();
+      return false;
+     }
+   MqlTradeResult result;
+   bool ambiguous;
+   string execution_error;
+   string lock_name;
+   double lock_token = 0.0;
+   if(!AcquireExecutionLock(g_symbol, lock_name, lock_token))
+     {
+      g_status = "Outra instância está processando uma ordem para este símbolo";
+      RecordEvent(manual ? "manual_apply_blocked" : "execution_lock_unavailable", g_analysis.request_id, g_status);
+      UpdatePanel();
+      return false;
+     }
+   // Revalidate mode and exposure immediately before the shared validation/send routine.
+   if(manual && (g_automation_enabled || g_execution_pending || g_daily_limit_reached ||
+                 HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol)))
+     {
+      ReleaseExecutionLock(lock_name, lock_token);
+      g_status = "Aplicação manual bloqueada: o estado operacional mudou antes do envio";
+      RecordEvent("manual_apply_blocked", g_analysis.request_id, g_status);
+      UpdatePanel();
+      return false;
+     }
+   bool sent = ValidateAndSendMarketOrder(g_analysis, g_symbol, g_contracts, g_max_loss_per_trade,
+                                          g_max_stop_points, g_round_trip_cost_per_contract,
+                                          InpMagicNumber, InpDeviationPoints, g_poll_interval_minutes * 60,
+                                          result, ambiguous, execution_error);
+   if(!sent)
+     {
+      if(ambiguous)
+        {
+         g_execution_blocked = true;
+         g_execution_lock_name = lock_name;
+         g_execution_lock_token = lock_token;
+        }
+      else
+         ReleaseExecutionLock(lock_name, lock_token);
+      g_status = (ambiguous ? "Resultado da ordem ambíguo: " : "Ordem bloqueada/rejeitada: ") + execution_error;
+      string failed_event = (manual ? (ambiguous ? "manual_order_ambiguous" : "manual_order_rejected") :
+                             (ambiguous ? "order_result_ambiguous" : "order_not_executed"));
+      RecordEvent(failed_event, g_analysis.request_id,
+                  execution_error + "; retcode=" + IntegerToString((int)result.retcode));
+      UpdatePanel();
+      return false;
+     }
+   g_status = StringFormat("Ordem enviada · retcode %u · deal %I64u", result.retcode, result.deal);
+   bool logged_order = RecordEvent(manual ? "manual_order_accepted" : "order_executed", g_analysis.request_id,
+                                   StringFormat("source=%s; direction=%s; volume=%s; SL=%s; TP=%s; retcode=%u; order=%I64u; deal=%I64u; %s",
+                                                source, g_analysis.direction, DoubleToString(g_contracts, 4),
+                                                DoubleToString(g_analysis.stop_loss, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
+                                                DoubleToString(g_analysis.take_profit, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
+                                                result.retcode, result.order, result.deal, result.comment));
+   g_execution_pending = true;
+   g_manual_execution_pending = manual;
+   g_execution_lock_name = lock_name;
+   g_execution_lock_token = lock_token;
+   g_pending_order_ticket = result.order;
+   g_pending_deal_ticket = result.deal;
+   if(logged_order)
+      g_status = "Ordem aceita; aguardando confirmação da transação";
+   UpdatePanel();
+   return true;
+  }
+
+void RunAnalysis(const bool manual)
+  {
+   if(manual)
+     {
+      if(g_automation_enabled || g_analysis_in_progress || g_execution_pending ||
+         HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol))
+        {
+         if(g_automation_enabled)
+            g_status = "Análise manual indisponível com automação ligada";
+         else if(g_analysis_in_progress)
+            g_status = "Análise manual já está em andamento";
+         else if(g_execution_pending)
+            g_status = "Análise manual indisponível: execução pendente";
+         else
+            g_status = "Análise manual indisponível: posição ou ordem ativa";
+         UpdatePanel();
+         return;
+        }
+      if(InpUseFixture || StringLen(InpBackendUrl) == 0)
+        {
+         g_status = (InpUseFixture ? "Análise manual indisponível na fixture de teste" :
+                     "Análise manual indisponível: configure a URL do backend");
+         UpdatePanel();
+         return;
+        }
+     }
+   else if(!g_automation_enabled)
       return;
    if(g_daily_limit_reached)
      {
@@ -345,6 +494,12 @@ void HandleAnalysisCycle()
    if(g_execution_pending)
      {
       g_status = "Aguardando confirmação da transação do servidor; polling pausado";
+      UpdatePanel();
+      return;
+     }
+   if(g_analysis_in_progress)
+     {
+      g_status = "Consulta já está em andamento";
       UpdatePanel();
       return;
      }
@@ -369,6 +524,10 @@ void HandleAnalysisCycle()
       return;
      }
 
+   g_analysis_in_progress = true;
+   ZeroMemory(g_analysis);
+   g_status = (manual ? "Análise manual pendente · aguardando backend" : "Consulta automática pendente");
+   UpdatePanel();
    string body;
    string build_error;
    if(!BuildMarketSnapshot(g_symbol, g_poll_interval_minutes, g_contracts,
@@ -377,14 +536,16 @@ void HandleAnalysisCycle()
                            g_last_request_id, body, build_error))
      {
       ZeroMemory(g_analysis);
-      g_status = "Captura indisponível: " + build_error;
-      RecordEvent("capture_error", g_last_request_id, build_error);
+      g_analysis_in_progress = false;
+      g_status = "Erro de captura: " + build_error;
+      RecordEvent(manual ? "manual_capture_error" : "capture_error", g_last_request_id, build_error);
       UpdatePanel();
       return;
      }
-   if(!RecordEvent("snapshot_sent", g_last_request_id,
+   if(!RecordEvent(manual ? "manual_analysis_requested" : "snapshot_sent", g_last_request_id,
                    "POST snapshot M5/7d; payload_bytes=" + IntegerToString(StringLen(body))))
      {
+      g_analysis_in_progress = false;
       UpdatePanel();
       return;
      }
@@ -395,14 +556,17 @@ void HandleAnalysisCycle()
    if(!PostMarketSnapshot(InpBackendUrl, InpHttpTimeoutMs, body, response, http_status, http_error))
      {
       ZeroMemory(g_analysis);
-      g_status = http_error;
-      RecordEvent("backend_error", g_last_request_id, http_error + "; HTTP=" + IntegerToString(http_status));
+      g_analysis_in_progress = false;
+      g_status = "Erro do backend: " + http_error;
+      RecordEvent(manual ? "manual_backend_error" : "backend_error", g_last_request_id,
+                  http_error + "; HTTP=" + IntegerToString(http_status));
       UpdatePanel();
       return;
      }
-   if(!RecordEvent("backend_response", g_last_request_id,
+   if(!RecordEvent(manual ? "manual_backend_response" : "backend_response", g_last_request_id,
                    "HTTP " + IntegerToString(http_status) + "; response=" + response))
      {
+      g_analysis_in_progress = false;
       UpdatePanel();
       return;
      }
@@ -412,15 +576,17 @@ void HandleAnalysisCycle()
    if(!ParseAnalysisResponse(response, g_last_request_id, g_symbol, tick_size, g_analysis, parse_error))
      {
       ZeroMemory(g_analysis);
-      g_status = "Resposta recusada: " + parse_error;
-      RecordEvent("response_rejected", g_last_request_id, parse_error);
+      g_analysis_in_progress = false;
+      g_status = "Erro de resposta: " + parse_error;
+      RecordEvent(manual ? "manual_response_rejected" : "response_rejected", g_last_request_id, parse_error);
       UpdatePanel();
       return;
      }
+   g_analysis_in_progress = false;
    if(!g_analysis.actionable)
      {
-      g_status = "Backend retornou sem sinal";
-      RecordEvent("no_signal", g_last_request_id, g_analysis.sources_summary);
+      g_status = "Sem sinal · " + g_analysis.reason_code + ": " + g_analysis.reason;
+      RecordEvent(manual ? "manual_no_signal" : "no_signal", g_last_request_id, g_analysis.sources_summary);
       UpdatePanel();
       return;
      }
@@ -431,6 +597,12 @@ void HandleAnalysisCycle()
       return;
      }
 
+   if(manual)
+     {
+      g_status = "Recomendação pronta · revise os níveis e aplique para enviar ordem";
+      UpdatePanel();
+      return;
+     }
    if(HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol))
      {
       g_status = "Posição/ordem apareceu durante consulta; entrada descartada";
@@ -438,53 +610,7 @@ void HandleAnalysisCycle()
       UpdatePanel();
       return;
      }
-   MqlTradeResult result;
-   bool ambiguous;
-   string execution_error;
-   string lock_name;
-   double lock_token = 0.0;
-   if(!AcquireExecutionLock(g_symbol, lock_name, lock_token))
-     {
-      g_status = "Outra instância está processando uma ordem para este símbolo";
-      RecordEvent("execution_lock_unavailable", g_last_request_id, g_status);
-      UpdatePanel();
-      return;
-     }
-   bool sent = ValidateAndSendMarketOrder(g_analysis, g_symbol, g_contracts, g_max_loss_per_trade,
-                                          g_max_stop_points, g_round_trip_cost_per_contract,
-                                          InpMagicNumber, InpDeviationPoints, g_poll_interval_minutes * 60,
-                                          result, ambiguous, execution_error);
-   if(!sent)
-     {
-      if(ambiguous)
-        {
-         g_execution_blocked = true;
-         g_execution_lock_name = lock_name;
-         g_execution_lock_token = lock_token;
-        }
-      else
-         ReleaseExecutionLock(lock_name, lock_token);
-      g_status = "Ordem bloqueada/rejeitada: " + execution_error;
-      RecordEvent("order_not_executed", g_last_request_id,
-                  execution_error + "; retcode=" + IntegerToString((int)result.retcode));
-      UpdatePanel();
-      return;
-     }
-   g_status = StringFormat("Ordem enviada · retcode %u · deal %I64u", result.retcode, result.deal);
-   bool logged_order = RecordEvent("order_executed", g_last_request_id,
-                                   StringFormat("direction=%s; volume=%s; SL=%s; TP=%s; retcode=%u; order=%I64u; deal=%I64u; %s",
-                                                g_analysis.direction, DoubleToString(g_contracts, 4),
-                                                DoubleToString(g_analysis.stop_loss, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
-                                                DoubleToString(g_analysis.take_profit, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
-                                                result.retcode, result.order, result.deal, result.comment));
-   g_execution_pending = true;
-   g_execution_lock_name = lock_name;
-   g_execution_lock_token = lock_token;
-   g_pending_order_ticket = result.order;
-   g_pending_deal_ticket = result.deal;
-   if(logged_order)
-      g_status = "Ordem aceita; aguardando confirmação da transação";
-   UpdatePanel();
+   ApplyCurrentAnalysis(false);
   }
 
 int OnInit()
@@ -548,7 +674,7 @@ void OnTimer()
       return;
      }
    if(g_automation_enabled)
-      HandleAnalysisCycle();
+      RunAnalysis(false);
    UpdatePanel();
   }
 
@@ -562,16 +688,48 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    double requested_cost = g_round_trip_cost_per_contract;
    double requested_daily_loss = g_daily_loss_limit;
    bool was_enabled = g_automation_enabled;
+   bool manual_analysis_requested = false;
+   bool manual_apply_requested = false;
    if(!PanelHandleChartEvent(id, sparam, g_automation_enabled, requested_volume, requested_interval,
                              requested_risk_reward, requested_max_stop, requested_max_loss,
-                             requested_cost, requested_daily_loss))
+                             requested_cost, requested_daily_loss,
+                             manual_analysis_requested, manual_apply_requested))
       return;
+   if(manual_analysis_requested)
+     {
+      if(g_automation_enabled)
+        {
+         g_status = "Análise manual indisponível com automação ligada";
+         UpdatePanel();
+         return;
+        }
+      if(HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol))
+        {
+         g_status = "Análise manual indisponível enquanto houver posição ou ordem ativa";
+         UpdatePanel();
+         return;
+        }
+      RunAnalysis(true);
+      return;
+     }
+   if(manual_apply_requested)
+     {
+      ApplyCurrentAnalysis(true);
+      return;
+     }
    bool risk_setting_changed = (id == CHARTEVENT_OBJECT_ENDEDIT &&
                                 (sparam == "ATEA_RR" || sparam == "ATEA_MAX_STOP" ||
                                  sparam == "ATEA_MAX_LOSS" || sparam == "ATEA_ROUND_TRIP_COST" ||
                                  sparam == "ATEA_DAILY_LOSS"));
    if(risk_setting_changed)
      {
+      bool risk_values_changed = (requested_risk_reward != g_risk_reward_preference ||
+                                  requested_max_stop != g_max_stop_points ||
+                                  requested_max_loss != g_max_loss_per_trade ||
+                                  requested_cost != g_round_trip_cost_per_contract ||
+                                  requested_daily_loss != g_daily_loss_limit);
+      if(risk_values_changed)
+         InvalidateAnalysisForChangedSettings();
       g_risk_reward_preference = requested_risk_reward;
       g_max_stop_points = requested_max_stop;
       g_max_loss_per_trade = requested_max_loss;
@@ -586,7 +744,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
         }
       else
         {
-         g_status = "Preferências de risco atualizadas";
+         g_status = (risk_values_changed ? "Risco atualizado · solicite nova análise" :
+                     "Preferências de risco conferidas");
          RecordEvent("risk_preferences_changed", g_last_request_id,
                      "rr=" + g_risk_reward_preference + "; max_stop_points=" + DoubleToString(g_max_stop_points, 2) +
                      "; max_loss=" + DoubleToString(g_max_loss_per_trade, 2) +
@@ -596,13 +755,17 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
      }
    if(id == CHARTEVENT_OBJECT_ENDEDIT)
      {
+      bool volume_changed = (sparam == "ATEA_VOLUME" && requested_volume != g_contracts);
+      if(volume_changed)
+         InvalidateAnalysisForChangedSettings();
       g_contracts = requested_volume;
       string volume_error;
       if(sparam == "ATEA_VOLUME" && !ValidateConfiguredVolume(g_contracts, volume_error))
          g_status = volume_error;
       else if(sparam == "ATEA_VOLUME")
         {
-         g_status = "Quantidade atualizada para " + DoubleToString(g_contracts, 2);
+         g_status = "Quantidade atualizada para " + DoubleToString(g_contracts, 2) +
+                    (volume_changed ? " · solicite nova análise" : "");
          RecordEvent("volume_changed", g_last_request_id, DoubleToString(g_contracts, 4));
         }
      }
@@ -666,7 +829,8 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRe
                              DoubleToString(HistoryDealGetDouble(transaction.deal, DEAL_SWAP), 2),
                              (ulong)HistoryDealGetInteger(transaction.deal, DEAL_MAGIC));
      }
-   bool transaction_logged = RecordEvent("trade_transaction", g_last_request_id, detail);
+   string transaction_request_id = (g_execution_pending ? g_analysis.request_id : g_last_request_id);
+   bool transaction_logged = RecordEvent("trade_transaction", transaction_request_id, detail);
    bool matching_transaction = ((g_pending_order_ticket > 0 && transaction.order == g_pending_order_ticket) ||
                                 (g_pending_deal_ticket > 0 && transaction.deal == g_pending_deal_ticket) ||
                                 (g_pending_order_ticket == 0 && g_pending_deal_ticket == 0 && transaction.type == TRADE_TRANSACTION_DEAL_ADD));
@@ -691,6 +855,8 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRe
                                   DoubleToString(actual_tp, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
                                   DoubleToString(g_analysis.stop_loss, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
                                   DoubleToString(g_analysis.take_profit, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS))));
+         if(g_manual_execution_pending)
+            RecordEvent("manual_order_ambiguous", g_last_request_id, "ordem sem proteção SL/TP confirmada na posição");
         }
       else
         {
@@ -699,7 +865,11 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRe
          g_execution_lock_token = 0.0;
          if(transaction_logged)
             g_status = "Execução confirmada com SL/TP ativos";
+         if(g_manual_execution_pending)
+            RecordEvent("manual_order_confirmed", g_last_request_id,
+                        "posição e proteções SL/TP confirmadas após transação");
         }
+      g_manual_execution_pending = false;
      }
    if(transaction_logged && !g_execution_blocked && !HasPositionForSymbol(g_symbol) &&
       !HasActiveOrderForSymbol(g_symbol) && g_automation_enabled)

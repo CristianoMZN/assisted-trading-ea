@@ -42,9 +42,11 @@ class TechnicalAnalysisTests(unittest.TestCase):
         self.assertEqual(result["missing"], ["candles[3].close"])
 
     def test_prompts_have_stable_versions(self):
+        for instrument in ("WIN", "WDO"):
+            self.assertIn(PROMPT_VERSIONS["news_analysis"], load_prompt("news_analysis", instrument=instrument))
         self.assertIn(PROMPT_VERSIONS["decision"], load_prompt("decision"))
         self.assertIn(PROMPT_VERSIONS["technical_interpretation"], load_prompt("technical_interpretation"))
-        self.assertEqual(len(version_records()), 3)
+        self.assertEqual(len(version_records()), 4)
         self.assertIn({"component": "technical_indicators", "version": "technical-indicators-v1"}, version_records())
 
 

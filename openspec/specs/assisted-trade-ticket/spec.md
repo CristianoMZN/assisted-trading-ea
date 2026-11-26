@@ -7,7 +7,7 @@ Permite ao cliente configurar quantidade e risco e, após ativação manual da a
 ## Requirements
 
 ### Requirement: Boleta apresenta a decisão do backend
-O EA SHALL receber e apresentar ação (compra, venda ou sem sinal), execução a mercado, stop loss, take profit e relação risco-retorno de 1:2 ou 1:3. O cliente SHALL poder configurar a quantidade dentro dos limites do símbolo antes de ativar automação. O backend decide se há operação, direção, preços e relação risco-retorno.
+O EA SHALL receber e apresentar ação (compra, venda ou sem sinal), execução a mercado, stop loss, take profit e relação risco-retorno. O cliente SHALL poder configurar quantidade e relação risco-retorno 1:2 ou 1:3. O backend decide se há operação, direção e preços respeitando essas preferências.
 
 #### Scenario: Backend retorna decisão válida com automação desligada
 - **WHEN** existe uma resposta atual e válida do backend com compra ou venda e a automação está desligada
@@ -18,11 +18,11 @@ O EA SHALL receber e apresentar ação (compra, venda ou sem sinal), execução 
 - **THEN** o EA informa sem sinal e não prepara uma ordem acionável
 
 #### Scenario: Backend retorna relação não aceita
-- **WHEN** a resposta não representa relação risco-retorno 1:2 ou 1:3 ou seus preços não correspondem à relação declarada dentro da precisão do símbolo
+- **WHEN** a resposta não corresponde à relação risco-retorno configurada ou seus preços não correspondem à relação declarada dentro da precisão do símbolo
 - **THEN** o EA rejeita a boleta e bloqueia o envio
 
 ### Requirement: Boleta respeita limites do símbolo e risco configurado
-Antes de qualquer envio automático, o EA SHALL validar quantidade contra volume mínimo, máximo e passo do símbolo, preços contra tick size e stops level, e perda estimada contra o limite máximo por operação configurado pelo cliente.
+Antes de qualquer envio automático, o EA SHALL validar quantidade contra volume mínimo, máximo e passo do símbolo, preços contra tick size e stops level, e perda estimada contra o limite máximo por operação, o máximo de stop em pontos e o custo configurados pelo cliente.
 
 #### Scenario: Quantidade fora dos limites do símbolo
 - **WHEN** a quantidade é inferior, superior ou incompatível com o passo permitido pelo broker
@@ -33,8 +33,12 @@ Antes de qualquer envio automático, o EA SHALL validar quantidade contra volume
 - **THEN** o EA bloqueia o envio e mostra quais valores precisam ser corrigidos
 
 #### Scenario: Limite de risco excedido ou não configurado
-- **WHEN** a perda estimada excede o limite do cliente ou o limite máximo por operação não está definido
+- **WHEN** a perda estimada excede o limite do cliente, o stop excede o máximo configurado ou o limite máximo por operação não está definido
 - **THEN** o EA bloqueia o envio e identifica a configuração ou valor incompatível
+
+#### Scenario: Custo inviabiliza o retorno líquido
+- **WHEN** o retorno estimado após o custo de ida e volta informado é zero ou negativo
+- **THEN** o EA bloqueia o envio e informa que os custos inviabilizam o retorno esperado
 
 ### Requirement: Automação exige ativação explícita e começa desligada
 O EA SHALL iniciar com automação desligada. Depois de ativada manualmente pelo cliente, SHALL executar uma ordem a mercado para cada decisão válida do backend, sem confirmação individual, desde que todas as validações de dados, símbolo e risco sejam atendidas. O cliente SHALL poder desligar a automação no painel a qualquer momento.
@@ -77,3 +81,37 @@ O sistema SHALL registrar snapshot enviado, resposta recebida, parâmetros usado
 #### Scenario: Registro não pode ser concluído
 - **WHEN** ocorre falha ao persistir registro ou resultado de execução
 - **THEN** o EA informa a falha e não a apresenta como registro concluído
+
+### Requirement: Limite diário protege as operações deste EA
+O EA SHALL apurar o resultado líquido diário das operações identificadas como suas em moeda da conta, incluindo resultado realizado e P&L aberto, e SHALL comparar esse valor com o limite diário configurado.
+
+#### Scenario: Limite diário atingido
+- **WHEN** o resultado líquido diário realizado e aberto alcança ou ultrapassa a perda máxima permitida
+- **THEN** o EA fecha posições abertas gerenciadas por este EA, interrompe consultas e novas ordens até o próximo dia de operação e informa o bloqueio
+
+#### Scenario: Operações de outros sistemas
+- **WHEN** a conta possui posições ou resultados que não pertencem a este EA
+- **THEN** eles não alteram o cálculo do limite diário nem são fechados pelo bloqueio deste EA
+
+#### Scenario: Início de novo dia de operação
+- **WHEN** começa o próximo dia de operação segundo a referência temporal definida para a conta
+- **THEN** o limite é recalculado para o novo dia e o cliente pode reativar a automação
+
+### Requirement: Cliente aplica manualmente uma recomendação vigente
+Com a automação desligada, o EA SHALL permitir que o cliente aplique explicitamente uma recomendação acionável, válida e correspondente ao símbolo atual, usando a quantidade e os limites de risco configurados no terminal.
+
+#### Scenario: Aplicar recomendação válida
+- **WHEN** o cliente aciona aplicar para uma recomendação ainda vigente e válida, com automação desligada e sem posição ou ordem ativa no símbolo
+- **THEN** o EA executa as validações existentes de volume, risco, preços, permissão de negociação e bloqueios e envia a ordem a mercado somente se todas forem aprovadas
+
+#### Scenario: Recomendação sem sinal, vencida ou inválida
+- **WHEN** o cliente tenta aplicar uma recomendação que não é acionável, está vencida, foi rejeitada na validação ou não corresponde ao símbolo atual
+- **THEN** o EA não envia a ordem e apresenta o motivo do bloqueio
+
+#### Scenario: Posição/ordem ativa ou automação ligada
+- **WHEN** o cliente tenta aplicar uma recomendação com posição ou ordem ativa no símbolo, ou com a automação ligada
+- **THEN** o EA não envia a ordem e informa que a aplicação manual está indisponível nesse estado
+
+#### Scenario: Resultado da aplicação manual
+- **WHEN** uma ordem manual é enviada, rejeitada ou tem resultado ambíguo
+- **THEN** o EA registra a resposta do backend, a recomendação aplicada, os parâmetros efetivos e o resultado real da execução associados ao mesmo `request_id`, sem registrar rejeição ou ambiguidade como ordem executada

@@ -25,6 +25,7 @@ class AnalysisRecord(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    macro_execution_id: Mapped[int | None] = mapped_column(ForeignKey("macro_executions.id"), nullable=True)
     evidence: Mapped[list["AnalysisEvidence"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
     versions: Mapped[list["AnalysisVersion"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
 
@@ -68,3 +69,24 @@ class ProviderCredential(Base):
     provider: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     encrypted_secret: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MacroExecution(Base):
+    """Immutable result of one instrument-specific macro refresh."""
+
+    __tablename__ = "macro_executions"
+    __table_args__ = (Index("ix_macro_executions_lookup", "logical_symbol", "state", "completed_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    logical_symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    items: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    rss_evidence: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    model_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)

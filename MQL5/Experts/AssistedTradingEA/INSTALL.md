@@ -16,7 +16,7 @@ chmod 600 .env
 
 O serviço usa `127.0.0.1:9000` por padrão, e `InpBackendUrl` já vem preenchido como `http://127.0.0.1:9000/v1/analyze`. Se o backend estiver em outro endereço, altere esse campo nas propriedades do EA. Libere `http://127.0.0.1:9000` em **Ferramentas → Opções → Expert Advisors** do terminal. `GET /health` informa as versões do serviço e do contrato. A requisição e resposta seguem `contracts/backend-v1.md` (schema 1.1).
 
-Copie `.env.example` para `.env` e informe nele `OPENROUTER_MODEL_TECHNICAL_INTERPRETATION`, `OPENROUTER_MODEL_DECISION` e `OPENROUTER_API_KEY`; os dois agentes podem usar modelos iguais ou diferentes. Esse arquivo é carregado automaticamente pelo backend e migrations, e está excluído do Git. Os feeds HTTPS opcionais também são configurados em `NEWS_RSS_URLS`. Instruções de instalação, configuração, banco, retenção e estados de erro estão em [backend/README.md](../../../backend/README.md).
+Copie `.env.example` para `.env` e informe nele `OPENROUTER_MODEL_NEWS_ANALYSIS`, `OPENROUTER_MODEL_TECHNICAL_INTERPRETATION`, `OPENROUTER_MODEL_DECISION` e `OPENROUTER_API_KEY`; os três agentes podem usar modelos iguais ou diferentes, desde que aceitem as capacidades exigidas pelo backend. Esse arquivo é carregado automaticamente pelo backend e migrations, e está excluído do Git. Os feeds HTTPS opcionais também são configurados em `NEWS_RSS_URLS`. Instruções de instalação, configuração, banco, retenção e estados de erro estão em [backend/README.md](../../../backend/README.md).
 
 ## Instalar na instância correta
 
@@ -59,11 +59,28 @@ No terminal, abra **Ferramentas → Opções → Expert Advisors** e adicione o 
 
 ## Ativação e comportamento
 
-O EA começa com automação desligada. Ajuste quantidade e intervalo no painel e só então clique **AUTOMAÇÃO: LIGADA**. Com automação ativa, uma resposta atual e válida que proponha compra/venda pode gerar ordem real a mercado sem confirmação individual, desde que passe pelas validações de símbolo, volume, stop, alvo e perda máxima.
+O EA começa com automação desligada. O painel separa **Mercado e estado**, **Recomendação e risco** e **Ações**. Ajuste quantidade, intervalo e limites de risco nos campos da boleta.
+
+Com a automação desligada, clique **ANALISAR AGORA** para enviar um snapshot M5 de sete dias ao backend. A análise manual exibe processamento, decisão, níveis, confiança e validade, sem enviar ordem. Confira a recomendação e clique **APLICAR RECOMENDAÇÃO** para solicitar a execução. O botão só fica habilitado para uma recomendação acionável e vigente, sem posição/ordem aberta, execução pendente ou bloqueio ativo.
+
+O EA revalida validade e símbolo e repete as verificações de exposição, volume, preço, stop, relação risco-retorno, perda máxima, permissão de negociação, distância mínima do broker e custos antes de enviar. Se uma condição falhar, a boleta mostra o motivo e nenhuma ordem é enviada. `no_signal`, erro HTTP, resposta inválida ou expirada não podem ser aplicados. Uma análise nova substitui a anterior; alterar volume ou parâmetros de risco também invalida a recomendação atual e exige nova análise.
+
+Com automação ativa, o botão manual fica indisponível. O polling automático preserva o comportamento existente: uma resposta atual e válida que proponha compra/venda pode gerar ordem real a mercado sem confirmação individual, desde que passe pelas mesmas validações.
+
+No log JSONL, `manual_analysis_requested` e `manual_backend_response`/`manual_backend_error` compartilham o `request_id` do snapshot. A aplicação registra `manual_apply_requested`, seguida de `manual_order_accepted`, `manual_order_rejected`, `manual_order_ambiguous` e/ou `manual_order_confirmed`, conforme o retorno real do terminal. Aceitação do envio não equivale à confirmação da transação.
 
 O polling pausa enquanto houver posição ou ordem ativa no símbolo e retoma após o encerramento. Desligar a automação impede novas consultas e entradas; não remove SL/TP de uma posição já aberta. Se o estado de uma solicitação ficar ambíguo ou o registro local falhar, o EA bloqueia novas operações para evitar repetição automática. Resposta `no_signal`, erro HTTP, versão incompatível ou dados insuficientes nunca geram ordem.
 
 Use primeiro uma conta demo para conferir endpoint permitido, mapeamento, tamanho da posição, proteções SL/TP, pause/resume e logs. O backend FastAPI está no diretório `backend/`; Polymarket não está integrado e aparece como fonte `not_relevant`.
+
+### Verificação da boleta no terminal demo
+
+Após copiar e compilar esta revisão no MetaEditor da mesma instância, confira no gráfico:
+
+1. Com automação desligada e sem exposição, **ANALISAR AGORA** fica disponível. Durante a consulta, o painel mostra análise pendente e impede outra consulta e a aplicação. Uma resposta `actionable` exibe direção e níveis sem enviar ordem; `no_signal` mostra o motivo e deixa **APLICAR RECOMENDAÇÃO** indisponível.
+2. Com o backend parado ou inacessível, a consulta mostra erro de serviço, limpa a boleta anterior e não oferece aplicação. Após uma resposta acionável expirar, a direção e os níveis deixam de aparecer como atuais.
+3. Alterar volume ou limites de risco após uma análise limpa a recomendação atual e pede nova análise. Em um cenário com stop ou perda acima dos limites configurados, confira que o bloqueio mostra o motivo e não registra execução confirmada.
+4. Com posição ou ordem ativa no símbolo, ou automação ligada, a análise manual e a aplicação ficam indisponíveis. Ao ligar a automação em conta demo, confirme que o polling continua usando o backend e que nenhuma entrada ocorre se houver bloqueio.
 
 ## Referências do fluxo de instalação
 

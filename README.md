@@ -1,6 +1,6 @@
 # Boleta assistida para WIN e WDO
 
-Expert Advisor para MetaTrader 5 e backend local Python/FastAPI. O EA captura dados do gráfico, envia snapshots por polling HTTP `POST` e apresenta a resposta. O backend calcula indicadores, coleta notícias RSS/Atom configuradas, consulta OpenRouter e valida deterministicamente a decisão antes de retornar uma entrada, stop loss e take profit.
+Expert Advisor para MetaTrader 5 e backend local Python/FastAPI. O EA captura dados do gráfico, envia snapshots por polling HTTP `POST` e apresenta a resposta. O backend calcula indicadores, pesquisa notícias macroeconômicas com OpenRouter Web Search/Web Fetch, pode coletar feeds RSS/Atom configurados, consulta os agentes OpenRouter e valida deterministicamente a decisão antes de retornar uma entrada, stop loss e take profit.
 
 ## Objetivo do MVP
 

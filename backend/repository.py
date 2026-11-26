@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.config import analysis_retention_days
@@ -38,6 +39,7 @@ class AnalysisRepository:
         *,
         versions: list[dict] | None = None,
         evidence: list[dict] | None = None,
+        macro_execution_id: int | None = None,
     ) -> None:
         request_id = request["request_id"]
         instrument = request["instrument"]
@@ -50,20 +52,23 @@ class AnalysisRepository:
         expires_at = _parse_timestamp(response.get("expires_at"))
         state = status if status in ("actionable", "no_signal") else "failed"
 
-        with self.session_factory() as session:
-            record = AnalysisRecord(
-                request_id=request_id,
-                logical_symbol=instrument["logical_symbol"],
-                broker_symbol=instrument["broker_symbol"],
-                state=state,
-                request_snapshot=request,
-                decision=decision,
-                reason_code=reason_code,
-                reason=reason,
-                created_at=created_at,
-                expires_at=expires_at,
-            )
-            for item in evidence if evidence is not None else response.get("sources", []):
+        evidence_items = evidence if evidence is not None else response.get("sources", [])
+        version_items = versions if versions is not None else response.get("versions", [])
+
+        def update_record(record: AnalysisRecord) -> None:
+            record.logical_symbol = instrument["logical_symbol"]
+            record.broker_symbol = instrument["broker_symbol"]
+            record.state = state
+            record.request_snapshot = request
+            record.decision = decision
+            record.reason_code = reason_code
+            record.reason = reason
+            record.created_at = created_at
+            record.expires_at = expires_at
+            record.macro_execution_id = macro_execution_id
+            record.evidence.clear()
+            existing_versions = {version.component: version for version in record.versions}
+            for item in evidence_items:
                 record.evidence.append(
                     AnalysisEvidence(
                         evidence_type=item["type"],
@@ -75,17 +80,40 @@ class AnalysisRepository:
                         data=item.get("data"),
                     )
                 )
-            for item in versions or response.get("versions", []):
-                record.versions.append(
-                    AnalysisVersion(
-                        component=item["component"],
-                        version=item["version"],
-                        model_id=item.get("model_id"),
-                        configuration=item.get("configuration"),
-                    )
+            for item in version_items:
+                component = item["component"]
+                version = existing_versions.pop(component, None)
+                if version is None:
+                    version = AnalysisVersion(component=component)
+                    record.versions.append(version)
+                version.version = item["version"]
+                version.model_id = item.get("model_id")
+                version.configuration = item.get("configuration")
+            for version in existing_versions.values():
+                record.versions.remove(version)
+
+        try:
+            with self.session_factory() as session:
+                record = session.scalar(
+                    select(AnalysisRecord).where(AnalysisRecord.request_id == request_id)
                 )
-            session.add(record)
-            session.commit()
+                if record is None:
+                    record = AnalysisRecord(request_id=request_id)
+                    session.add(record)
+                update_record(record)
+                session.commit()
+        except IntegrityError:
+            # Another request with this id may have inserted between our read
+            # and commit. Retry as an update so duplicate submissions stay
+            # idempotent under concurrent requests too.
+            with self.session_factory() as session:
+                record = session.scalar(
+                    select(AnalysisRecord).where(AnalysisRecord.request_id == request_id)
+                )
+                if record is None:
+                    raise
+                update_record(record)
+                session.commit()
 
     def get(self, request_id: str) -> dict | None:
         with self.session_factory() as session:
@@ -104,6 +132,7 @@ class AnalysisRepository:
                 "reason": record.reason,
                 "created_at": record.created_at.isoformat(),
                 "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+                "macro_execution_id": record.macro_execution_id,
                 "evidence": [
                     {
                         "type": evidence.evidence_type,

@@ -67,6 +67,12 @@ bool ValidateAndSendMarketOrder(const AnalysisData &analysis, const string symbo
       error = "Análise não pode ser executada";
       return false;
      }
+   if(analysis.symbol != symbol || StringLen(symbol) == 0 ||
+      !SymbolSelect(symbol, true) || SymbolInfoInteger(symbol, SYMBOL_SELECT) == 0)
+     {
+      error = "Símbolo da recomendação não corresponde ao símbolo negociável selecionado";
+      return false;
+     }
    if(TimeGMT() >= analysis.expires_at)
      {
       error = "Resposta do backend venceu antes do envio";

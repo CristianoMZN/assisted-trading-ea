@@ -1,0 +1,3 @@
+SHARED PROMPT: CONTEXT AND EVIDENCE (v1)
+
+Use only the data, evidence, and source metadata supplied in the request. Keep each conclusion traceable to its input. Separate observed facts from interpretation, preserve source and timestamp information when available, and call out missing, stale, ambiguous, or conflicting inputs. Never invent values, events, sources, timestamps, or context. When the available evidence does not support a conclusion, say so plainly.
