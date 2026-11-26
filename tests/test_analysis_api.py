@@ -70,6 +70,8 @@ class FakeProvider:
 
 class AnalysisApiCacheTests(unittest.TestCase):
     def setUp(self):
+        self.snapshot_age_patch = patch.dict("os.environ", {"MARKET_SNAPSHOT_MAX_AGE_SECONDS": "30"})
+        self.snapshot_age_patch.start()
         self.engine = create_engine("sqlite://")
         Base.metadata.create_all(self.engine)
         self.factory = sessionmaker(self.engine, expire_on_commit=False)
@@ -79,6 +81,7 @@ class AnalysisApiCacheTests(unittest.TestCase):
 
     def tearDown(self):
         self.factory_patch.stop()
+        self.snapshot_age_patch.stop()
         self.engine.dispose()
 
     def seed(self, instrument="WDO", status="available", completed=None):

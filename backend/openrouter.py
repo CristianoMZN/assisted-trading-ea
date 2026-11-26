@@ -121,8 +121,13 @@ def validate_candidate(value: Any) -> dict:
         raise OpenRouterError("invalid_model_output", "Model output contains an unsupported action.", retryable=False)
     if value.get("confidence") not in ("low", "medium", "high"):
         raise OpenRouterError("invalid_model_output", "Model output contains an unsupported confidence value.", retryable=False)
-    if not isinstance(value.get("scenario"), str) or not value["scenario"].strip() or len(value["scenario"]) > 240:
-        raise OpenRouterError("invalid_model_output", "Model output explanation is missing or too long.", retryable=False)
+    scenario = value.get("scenario")
+    if not isinstance(scenario, str):
+        raise OpenRouterError("invalid_model_output", "Decision scenario must be a string.", retryable=False)
+    if not scenario.strip():
+        raise OpenRouterError("invalid_model_output", "Decision scenario must be non-empty.", retryable=False)
+    if len(scenario) > 240:
+        raise OpenRouterError("invalid_model_output", "Decision scenario exceeds 240 characters.", retryable=False)
     if action == "NO_SIGNAL":
         if any(value.get(field) is not None for field in ("reference_price", "stop_loss", "take_profit", "risk_reward")):
             raise OpenRouterError("invalid_model_output", "No-signal model output must not contain actionable prices.", retryable=False)

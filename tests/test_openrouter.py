@@ -4,7 +4,7 @@ import unittest
 
 import httpx
 
-from backend.openrouter import OpenRouterClient, OpenRouterError, validate_news_analysis
+from backend.openrouter import OpenRouterClient, OpenRouterError, validate_candidate, validate_news_analysis
 
 
 def candidate(action="BUY"):
@@ -85,6 +85,23 @@ class OpenRouterClientTests(unittest.TestCase):
         result = self.run_async(client.decide({"market": "snapshot"}))
         self.assertEqual(result["action"], "NO_SIGNAL")
         self.assertIsNone(result["reference_price"])
+
+    def test_decision_scenario_reports_safe_validation_reason(self):
+        for scenario, diagnostic in (
+            (None, "must be a string"),
+            ("   ", "must be non-empty"),
+            ("private " + "x" * 241, "exceeds 240 characters"),
+        ):
+            with self.subTest(diagnostic=diagnostic), self.assertRaises(OpenRouterError) as caught:
+                validate_candidate({**candidate(), "scenario": scenario})
+            self.assertEqual(caught.exception.code, "invalid_model_output")
+            self.assertIn(diagnostic, caught.exception.message)
+            self.assertNotIn("private", caught.exception.message)
+
+    def test_decision_prompt_requires_brief_scenario(self):
+        from backend.prompts import PROMPT_VERSIONS, load_prompt
+        self.assertEqual(PROMPT_VERSIONS["decision"], "market-decision-v2")
+        self.assertIn("at most 240 characters", load_prompt("decision"))
 
     def test_news_request_requires_schema_capable_provider(self):
         def respond(request):

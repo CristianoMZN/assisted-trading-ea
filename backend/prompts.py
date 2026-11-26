@@ -8,7 +8,7 @@ from pathlib import Path
 PROMPT_VERSIONS = {
     "news_analysis": "macroeconomic-news-v7",
     "technical_interpretation": "technical-interpretation-v1",
-    "decision": "market-decision-v1",
+    "decision": "market-decision-v2",
 }
 ANALYSIS_VERSIONS = {"technical_indicators": "technical-indicators-v1", **PROMPT_VERSIONS}
 PROMPT_DIR = Path(__file__).with_name("prompts")
@@ -21,6 +21,8 @@ def load_prompt(component: str, *, instrument: str | None = None) -> str:
         if instrument not in ("WIN", "WDO"):
             raise ValueError("news_analysis requires instrument WIN or WDO")
         filename = f"news_analysis_{instrument.lower()}_v7.txt"
+    elif component == "decision":
+        filename = "decision_v2.txt"
     else:
         filename = f"{component}_v1.txt"
     path = PROMPT_DIR / filename

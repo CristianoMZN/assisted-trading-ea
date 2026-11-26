@@ -36,6 +36,8 @@ Check service health at `GET /health`. Submit contract version 1.1 snapshots to 
 
 Each online analysis stores the macro cache ID, the original macro/RSS evidence and model/prompt versions, plus technical and decision model versions. Server logs include stage durations for indicators, cache read, technical interpretation, decision, and persistence. They omit provider credentials and raw model output.
 
+The decision prompt is versioned as `market-decision-v2`. Its `scenario` explanation must be a non-empty string of at most 240 characters. If OpenRouter returns a malformed decision, the backend responds with `invalid_model_output` and a safe validation reason; this is a local rejection of the model's content, not an OpenRouter HTTP error. The raw model response is not persisted.
+
 An OpenRouter key can alternatively be saved encrypted in the local database, with its encryption key held in the operating system credential vault. The environment or `.env` value takes precedence. Do not put provider credentials in EA inputs or request payloads.
 
 To save a key in the OS vault, run this from the repository root after migrations. `getpass` prompts without echoing the key:
