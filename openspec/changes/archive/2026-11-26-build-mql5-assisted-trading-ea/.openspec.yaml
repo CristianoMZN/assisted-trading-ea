@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-25
+goal: Entregar um Expert Advisor compilável que colete dados M5 por sete dias,
+  apresente a decisão do backend Python e opere ordens reais a mercado sem
+  confirmação por ordem após ativação manual da automação, com validações de risco e símbolo.
