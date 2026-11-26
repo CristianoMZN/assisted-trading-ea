@@ -7,6 +7,14 @@
     "logical_symbol": "WDO",
     "broker_symbol": "WDOZ26"
   },
+  "symbol_properties": {
+    "point": 0.01,
+    "tick_size": 0.5,
+    "tick_value_loss": 0.5,
+    "tick_value_profit": 0.5,
+    "stops_level_points": 0,
+    "digits": 1
+  },
   "timeframe": "M5",
   "window": {
     "from": "2026-11-18T14:05:00Z",
@@ -49,6 +57,7 @@
     "max_stop_points": 100.0,
     "max_loss_per_trade": 200.0,
     "round_trip_cost_per_contract": 1.5,
-    "daily_loss_limit": 500.0
+    "daily_loss_limit": 500.0,
+    "contracts": 1.0
   }
 }

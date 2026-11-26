@@ -49,21 +49,33 @@ def _instrument(value: object, context: str) -> dict:
 
 def _preferences(value: object) -> dict:
     preferences = _object(value, "preferences")
-    _required(preferences, ("risk_reward", "max_stop_points", "max_loss_per_trade", "round_trip_cost_per_contract", "daily_loss_limit"), "preferences")
+    _required(preferences, ("risk_reward", "max_stop_points", "max_loss_per_trade", "round_trip_cost_per_contract", "daily_loss_limit", "contracts"), "preferences")
     _require(preferences["risk_reward"] in ("1:2", "1:3"), "preferences.risk_reward must be 1:2 or 1:3")
-    for name in ("max_stop_points", "max_loss_per_trade", "round_trip_cost_per_contract", "daily_loss_limit"):
+    for name in ("max_stop_points", "max_loss_per_trade", "round_trip_cost_per_contract", "daily_loss_limit", "contracts"):
         number = preferences[name]
         _require(isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number), f"preferences.{name} must be a finite number")
         _require(number >= 0, f"preferences.{name} must be non-negative")
     _require(preferences["max_stop_points"] > 0, "preferences.max_stop_points must be positive")
     _require(preferences["max_loss_per_trade"] > 0, "preferences.max_loss_per_trade must be positive")
     _require(preferences["daily_loss_limit"] > 0, "preferences.daily_loss_limit must be positive")
+    _require(preferences["contracts"] > 0, "preferences.contracts must be positive")
     return preferences
+
+
+def _symbol_properties(value: object) -> dict:
+    properties = _object(value, "symbol_properties")
+    _required(properties, ("point", "tick_size", "tick_value_loss", "tick_value_profit", "stops_level_points", "digits"), "symbol_properties")
+    for name in ("point", "tick_size", "tick_value_loss", "tick_value_profit"):
+        number = properties[name]
+        _require(isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number) and number > 0, f"symbol_properties.{name} must be a finite positive number")
+    _require(isinstance(properties["stops_level_points"], int) and not isinstance(properties["stops_level_points"], bool) and properties["stops_level_points"] >= 0, "symbol_properties.stops_level_points must be a non-negative integer")
+    _require(isinstance(properties["digits"], int) and not isinstance(properties["digits"], bool) and 0 <= properties["digits"] <= 12, "symbol_properties.digits must be an integer from 0 through 12")
+    return properties
 
 
 def validate_request(payload: object) -> None:
     request = _object(payload, "request")
-    _required(request, ("schema_version", "message_type", "request_id", "sent_at", "instrument", "timeframe", "window", "server_utc_offset_seconds", "history_first_available_at", "current_quote", "tick_flow", "candles", "unavailable_fields", "preferences"), "request")
+    _required(request, ("schema_version", "message_type", "request_id", "sent_at", "instrument", "symbol_properties", "timeframe", "window", "server_utc_offset_seconds", "history_first_available_at", "current_quote", "tick_flow", "candles", "unavailable_fields", "preferences"), "request")
     _require(request["schema_version"] == VERSION, "unsupported schema_version")
     _require(request["message_type"] == "market_snapshot", "message_type must be market_snapshot")
     try:
@@ -72,6 +84,7 @@ def validate_request(payload: object) -> None:
         raise ContractError("request_id must be a UUID") from exc
     sent_at = _timestamp(request["sent_at"], "sent_at")
     _instrument(request["instrument"], "request")
+    _symbol_properties(request["symbol_properties"])
     _preferences(request["preferences"])
     _require(request["timeframe"] == "M5", "timeframe must be M5")
 

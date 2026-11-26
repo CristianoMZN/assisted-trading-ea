@@ -33,8 +33,8 @@ Antes de qualquer envio automático, o EA SHALL validar quantidade contra volume
 - **THEN** o EA bloqueia o envio e identifica a configuração ou valor incompatível
 
 #### Scenario: Custo inviabiliza o retorno líquido
-- **WHEN** o retorno estimado após o custo de ida e volta informado não satisfaz a relação risco-retorno configurada
-- **THEN** o EA bloqueia o envio e informa que o retorno líquido não atende à configuração
+- **WHEN** o retorno estimado após o custo de ida e volta informado é zero ou negativo
+- **THEN** o EA bloqueia o envio e informa que os custos inviabilizam o retorno esperado
 
 ## ADDED Requirements
 

@@ -48,6 +48,12 @@ class BackendContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "risk_reward must be 1:2 or 1:3"):
             validate_request(request)
 
+    def test_request_requires_symbol_tick_properties(self):
+        request = copy.deepcopy(self.request)
+        del request["symbol_properties"]["tick_value_loss"]
+        with self.assertRaisesRegex(ContractError, "symbol_properties missing required fields: tick_value_loss"):
+            validate_request(request)
+
     def test_missing_required_candle_field_is_rejected(self):
         request = copy.deepcopy(self.request)
         del request["candles"][0]["close"]

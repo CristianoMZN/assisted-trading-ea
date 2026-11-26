@@ -37,7 +37,11 @@ string NewRequestId()
                        (ushort)(c & 0x0FFF), (ushort)(d & 0x3FFF), e, (ushort)MathRand());
   }
 
-bool BuildMarketSnapshot(const string symbol, const int interval_minutes, string &request_id, string &body, string &error)
+bool BuildMarketSnapshot(const string symbol, const int interval_minutes, const double contracts,
+                         const string risk_reward_preference, const double max_stop_points,
+                         const double max_loss_per_trade, const double round_trip_cost,
+                         const double daily_loss_limit,
+                         string &request_id, string &body, string &error)
   {
    error = "";
    request_id = NewRequestId();
@@ -79,6 +83,18 @@ bool BuildMarketSnapshot(const string symbol, const int interval_minutes, string
       error = "Cotação bid/ask atual indisponível ou inconsistente";
       return false;
      }
+   double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tick_value_loss = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+   double tick_value_profit = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE_PROFIT);
+   long stops_level_points = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   if(point <= 0 || tick_size <= 0 || tick_value_loss <= 0 || tick_value_profit <= 0 ||
+      stops_level_points < 0 || digits < 0 || contracts <= 0)
+     {
+      error = "Propriedades de tick/risco ou quantidade indisponíveis para o símbolo";
+      return false;
+     }
    datetime quote_utc_time = current_quote.time - server_utc_offset;
    if(quote_utc_time <= 0 || to_time - quote_utc_time > MathMax(60, interval_minutes * 60))
      {
@@ -117,7 +133,12 @@ bool BuildMarketSnapshot(const string symbol, const int interval_minutes, string
    string quote_real_volume = (current_quote.volume_real > 0 ? DoubleToString(current_quote.volume_real, 8) : "null");
    body = "{\"schema_version\":\"1.1\",\"message_type\":\"market_snapshot\",\"request_id\":\"" +
           request_id + "\",\"sent_at\":\"" + sent_at + "\",\"instrument\":{\"logical_symbol\":\"" +
-          logical + "\",\"broker_symbol\":\"" + JsonEscape(symbol) + "\"},\"timeframe\":\"M5\",\"window\":{\"from\":\"" +
+          logical + "\",\"broker_symbol\":\"" + JsonEscape(symbol) + "\"},\"symbol_properties\":{" +
+          "\"point\":" + DoubleToString(point, 10) + ",\"tick_size\":" + DoubleToString(tick_size, 10) +
+          ",\"tick_value_loss\":" + DoubleToString(tick_value_loss, 8) +
+          ",\"tick_value_profit\":" + DoubleToString(tick_value_profit, 8) +
+          ",\"stops_level_points\":" + IntegerToString((int)stops_level_points) +
+          ",\"digits\":" + IntegerToString(digits) + "},\"timeframe\":\"M5\",\"window\":{\"from\":\"" +
           UtcIso8601(from_time) + "\",\"to\":\"" + sent_at + "\"},\"server_utc_offset_seconds\":" + IntegerToString(server_utc_offset) +
           ",\"history_first_available_at\":\"" + UtcIso8601((datetime)first_history_time - server_utc_offset) + "\"" +
           ",\"current_quote\":{\"timestamp\":\"" + UtcIso8601(quote_utc_time) + "\",\"bid\":" + DoubleToString(current_quote.bid, 8) +
@@ -175,11 +196,12 @@ bool BuildMarketSnapshot(const string symbol, const int interval_minutes, string
    body += "],\"unavailable_fields\":[\"buy_volume\",\"sell_volume\"";
    if(!has_real_volume)
       body += ",\"real_volume\"";
-   body += "],\"preferences\":{\"risk_reward\":\"" + JsonEscape(InpRiskRewardPreference) +
-           "\",\"max_stop_points\":" + DoubleToString(InpMaxStopPoints, 8) +
-           ",\"max_loss_per_trade\":" + DoubleToString(InpMaxLossPerTrade, 8) +
-           ",\"round_trip_cost_per_contract\":" + DoubleToString(InpRoundTripCostPerContract, 8) +
-           ",\"daily_loss_limit\":" + DoubleToString(InpDailyLossLimit, 8) + "}}";
+   body += "],\"preferences\":{\"risk_reward\":\"" + JsonEscape(risk_reward_preference) +
+           "\",\"max_stop_points\":" + DoubleToString(max_stop_points, 8) +
+           ",\"max_loss_per_trade\":" + DoubleToString(max_loss_per_trade, 8) +
+           ",\"round_trip_cost_per_contract\":" + DoubleToString(round_trip_cost, 8) +
+           ",\"daily_loss_limit\":" + DoubleToString(daily_loss_limit, 8) +
+           ",\"contracts\":" + DoubleToString(contracts, 8) + "}}";
    return true;
   }
 

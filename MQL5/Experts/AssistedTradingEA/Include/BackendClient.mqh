@@ -14,6 +14,21 @@ datetime ParseUtcIso8601(const string value)
    return StringToTime(date_part + " " + time_part);
   }
 
+bool IsStableReasonCode(const string value)
+  {
+   int length = StringLen(value);
+   if(length == 0 || StringSubstr(value, 0, 1) == "_" || StringSubstr(value, length - 1, 1) == "_")
+      return false;
+   for(int i = 0; i < length; i++)
+     {
+      ushort ch = StringGetCharacter(value, i);
+      bool valid = ((ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57) || ch == 95);
+      if(!valid)
+         return false;
+     }
+   return true;
+  }
+
 bool ValidateSourceBlocks(const JsonToken &tokens[], int root, datetime now,
                           string &summary, datetime &source_expiry, string &error)
   {
@@ -49,7 +64,10 @@ bool ValidateSourceBlocks(const JsonToken &tokens[], int root, datetime now,
          return false;
         }
       bool not_relevant = (type == "prediction_market" && status == "not_relevant");
-      if(status != "valid" && !not_relevant)
+      bool informative_absence = ((type == "news" &&
+                                   (status == "available" || status == "empty" || status == "unavailable" || status == "not_configured")) ||
+                                  (type == "technical" && status == "insufficient"));
+      if(status != "valid" && !not_relevant && !informative_absence)
         {
          error = "Fonte " + type + " inválida ou desatualizada: " + status;
          return false;
@@ -60,7 +78,8 @@ bool ValidateSourceBlocks(const JsonToken &tokens[], int root, datetime now,
          error = "Fonte " + type + " sem origem/horário válido ou vencida";
          return false;
         }
-      if(!not_relevant && (source_expiry == 0 || valid_until < source_expiry))
+      if(status == "valid" || status == "available" || status == "insufficient")
+         if(source_expiry == 0 || valid_until < source_expiry)
          source_expiry = valid_until;
       if(StringLen(summary) > 0)
          summary += " | ";
@@ -138,7 +157,7 @@ bool ParseAnalysisResponse(const string json, const string expected_id, const st
      {
       analysis.reason_code = JsonString(tokens, 0, "reason_code");
       analysis.reason = JsonString(tokens, 0, "reason");
-      if(decision < 0 || tokens[decision].type != JSON_NULL || StringLen(analysis.reason_code) == 0 || StringLen(analysis.reason) == 0)
+      if(decision < 0 || tokens[decision].type != JSON_NULL || !IsStableReasonCode(analysis.reason_code) || StringLen(analysis.reason) == 0)
         {
          error = "Resposta no_signal deve conter motivo e não pode conter decisão";
          return false;

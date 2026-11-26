@@ -27,3 +27,27 @@ def server_port() -> int:
 
 def log_level() -> str:
     return os.getenv("BACKEND_LOG_LEVEL", "info").lower()
+
+
+def analysis_retention_days() -> int:
+    try:
+        days = int(os.getenv("ANALYSIS_RETENTION_DAYS", "30"))
+    except ValueError as exc:
+        raise ValueError("ANALYSIS_RETENTION_DAYS must be an integer") from exc
+    if not 1 <= days <= 3650:
+        raise ValueError("ANALYSIS_RETENTION_DAYS must be between 1 and 3650")
+    return days
+
+
+def openrouter_model() -> str:
+    return os.getenv("OPENROUTER_MODEL", "").strip()
+
+
+def openrouter_timeout_seconds() -> float:
+    try:
+        timeout = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "20"))
+    except ValueError as exc:
+        raise ValueError("OPENROUTER_TIMEOUT_SECONDS must be a number") from exc
+    if not 0.5 <= timeout <= 120:
+        raise ValueError("OPENROUTER_TIMEOUT_SECONDS must be between 0.5 and 120")
+    return timeout

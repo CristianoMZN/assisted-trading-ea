@@ -8,6 +8,7 @@
 #include "Include/BackendClient.mqh"
 #include "Include/Panel.mqh"
 #include "Include/AuditLog.mqh"
+#include "Include/DailyRisk.mqh"
 #include "Include/Execution.mqh"
 
 AnalysisData g_analysis;
@@ -23,6 +24,76 @@ string g_execution_lock_name = "";
 double g_execution_lock_token = 0.0;
 double g_contracts = 0.0;
 int g_poll_interval_minutes = 1;
+string g_risk_reward_preference = "1:2";
+double g_max_stop_points = 0.0;
+double g_max_loss_per_trade = 0.0;
+double g_round_trip_cost_per_contract = 0.0;
+double g_daily_loss_limit = 0.0;
+double g_daily_realized_pnl = 0.0;
+double g_daily_floating_pnl = 0.0;
+double g_daily_total_pnl = 0.0;
+bool g_daily_limit_reached = false;
+string g_daily_close_failure = "";
+datetime g_daily_trade_day = 0;
+
+string DailyBlockGlobalName()
+  {
+   return StringFormat("ATEA_DAILY_%I64u_%I64u",
+                       (ulong)AccountInfoInteger(ACCOUNT_LOGIN), InpMagicNumber);
+  }
+
+bool LoadDailyBlock(const datetime trading_day)
+  {
+   string name = DailyBlockGlobalName();
+   if(!GlobalVariableCheck(name))
+      return false;
+   datetime stored_day = (datetime)GlobalVariableGet(name);
+   if(stored_day < trading_day)
+     {
+      GlobalVariableDel(name);
+      return false;
+     }
+   return (stored_day >= trading_day);
+  }
+
+bool PersistDailyBlock(const datetime trading_day)
+  {
+   if(GlobalVariableSet(DailyBlockGlobalName(), (double)trading_day) <= 0)
+      return false;
+   GlobalVariablesFlush();
+   return true;
+  }
+
+bool ValidateRiskPreferences(string &error)
+  {
+   error = "";
+   if(g_risk_reward_preference != "1:2" && g_risk_reward_preference != "1:3")
+     {
+      error = "RR deve ser 1:2 ou 1:3";
+      return false;
+     }
+   if(!MathIsValidNumber(g_max_stop_points) || g_max_stop_points <= 0)
+     {
+      error = "Configure stop máximo positivo em pontos";
+      return false;
+     }
+   if(!MathIsValidNumber(g_max_loss_per_trade) || g_max_loss_per_trade <= 0)
+     {
+      error = "Configure perda máxima positiva por operação";
+      return false;
+     }
+   if(!MathIsValidNumber(g_round_trip_cost_per_contract) || g_round_trip_cost_per_contract < 0)
+     {
+      error = "Custo de ida e volta não pode ser negativo";
+      return false;
+     }
+   if(!MathIsValidNumber(g_daily_loss_limit) || g_daily_loss_limit <= 0)
+     {
+      error = "Configure perda máxima diária positiva";
+      return false;
+     }
+   return true;
+  }
 
 bool RecordEvent(const string event_name, const string request_id, const string detail)
   {
@@ -32,6 +103,73 @@ bool RecordEvent(const string event_name, const string request_id, const string 
    g_status = "Falha no registro local; novas operações automáticas bloqueadas";
    Print(g_status, " (", GetLastError(), ")");
    return false;
+  }
+
+void UpdateDailyRisk()
+  {
+   datetime trading_day = TradingDayStart();
+   if(trading_day <= 0)
+     {
+      g_execution_blocked = true;
+      g_status = "Data de negociação indisponível · execução bloqueada";
+      return;
+     }
+   if(g_daily_trade_day != trading_day)
+     {
+      g_daily_trade_day = trading_day;
+      g_daily_limit_reached = LoadDailyBlock(trading_day);
+      g_daily_close_failure = "";
+     }
+   string calculation_error;
+   if(!CalculateDailyPnl(InpMagicNumber, g_daily_realized_pnl, g_daily_floating_pnl,
+                         g_daily_total_pnl, calculation_error))
+     {
+      g_execution_blocked = true;
+      g_status = "Apuração diária indisponível · execução bloqueada";
+      RecordEvent("daily_pnl_error", "", calculation_error);
+      return;
+     }
+   if(g_daily_loss_limit <= 0)
+      return;
+   if(g_daily_total_pnl <= -g_daily_loss_limit && !g_daily_limit_reached)
+     {
+      g_daily_limit_reached = true;
+      if(!PersistDailyBlock(trading_day))
+        {
+         g_execution_blocked = true;
+         g_status = "Limite diário atingido · falha ao persistir bloqueio";
+         RecordEvent("daily_loss_state_persist_failed", "", DailyBlockGlobalName());
+        }
+      RecordEvent("daily_loss_limit_reached", "",
+                  StringFormat("day=%s; realized=%.2f; floating=%.2f; total=%.2f",
+                               TimeToString(trading_day, TIME_DATE), g_daily_realized_pnl,
+                               g_daily_floating_pnl, g_daily_total_pnl));
+     }
+   if(!g_daily_limit_reached)
+      return;
+
+   g_automation_enabled = false;
+   PanelSetAutomation(false);
+   int closed_count = 0;
+   string close_error;
+   string previous_close_failure = g_daily_close_failure;
+   bool all_closed = CloseManagedPositions(InpMagicNumber, InpDeviationPoints, closed_count, close_error);
+   if(all_closed)
+     {
+      g_daily_close_failure = "";
+      g_status = StringFormat("Limite diário atingido · %.2f · automação suspensa", g_daily_total_pnl);
+      if(closed_count > 0)
+         RecordEvent("daily_loss_positions_closed", "", StringFormat("closed=%d", closed_count));
+      else if(StringLen(previous_close_failure) > 0)
+         RecordEvent("daily_loss_close_resolved", "", "all managed positions are closed");
+     }
+   else
+     {
+      g_daily_close_failure = close_error;
+      g_status = "Limite diário atingido · falha ao fechar posição: " + close_error;
+      if(close_error != previous_close_failure)
+         RecordEvent("daily_loss_close_failed", "", close_error);
+     }
   }
 
 bool ResolveConfiguredSymbol(string &symbol, string &error)
@@ -60,7 +198,7 @@ bool ValidateConfiguredVolume(const double volume, string &error)
    double min_volume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
    double max_volume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
    double step = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
-   if(volume <= 0 || volume < min_volume || volume > max_volume || step <= 0 ||
+   if(!MathIsValidNumber(volume) || volume <= 0 || volume < min_volume || volume > max_volume || step <= 0 ||
       MathAbs((volume - min_volume) / step - MathRound((volume - min_volume) / step)) > 0.000001)
      {
       error = StringFormat("Quantidade deve respeitar mínimo %s, máximo %s e passo %s",
@@ -108,11 +246,13 @@ bool CanEnableAutomation(string &error)
       error = "Existe ordem ativa para o símbolo; resolva-a antes de ligar a automação";
       return false;
      }
-   if(InpMaxLossPerTrade <= 0)
+   if(g_daily_limit_reached)
      {
-      error = "Configure uma perda máxima positiva por operação";
+      error = "Limite diário atingido; aguarde o próximo dia do servidor e reative manualmente";
       return false;
      }
+   if(!ValidateRiskPreferences(error))
+      return false;
    if(!ValidateConfiguredVolume(g_contracts, error))
       return false;
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED) ||
@@ -134,7 +274,9 @@ void UpdatePanel()
      }
    bool position_open = (StringLen(g_symbol) > 0 && (HasPositionForSymbol(g_symbol) || HasActiveOrderForSymbol(g_symbol)));
    PanelUpdate(g_symbol, g_status, g_analysis, g_automation_enabled, g_poll_interval_minutes,
-               g_contracts, position_open, g_execution_blocked);
+               g_contracts, position_open, g_execution_blocked,
+               g_daily_realized_pnl, g_daily_floating_pnl, g_daily_total_pnl,
+               g_daily_loss_limit, g_daily_limit_reached, g_daily_close_failure);
   }
 
 void BuildFixtureAnalysis()
@@ -186,6 +328,14 @@ void HandleAnalysisCycle()
   {
    if(!g_automation_enabled)
       return;
+   if(g_daily_limit_reached)
+     {
+      g_automation_enabled = false;
+      g_status = "Limite diário atingido · novas consultas e ordens suspensas";
+      PanelSetAutomation(false);
+      UpdatePanel();
+      return;
+     }
    if(g_execution_blocked)
      {
       g_status = "Execução bloqueada; verifique ordem/posição antes de reiniciar o EA";
@@ -221,7 +371,10 @@ void HandleAnalysisCycle()
 
    string body;
    string build_error;
-   if(!BuildMarketSnapshot(g_symbol, g_poll_interval_minutes, g_last_request_id, body, build_error))
+   if(!BuildMarketSnapshot(g_symbol, g_poll_interval_minutes, g_contracts,
+                           g_risk_reward_preference, g_max_stop_points, g_max_loss_per_trade,
+                           g_round_trip_cost_per_contract, g_daily_loss_limit,
+                           g_last_request_id, body, build_error))
      {
       ZeroMemory(g_analysis);
       g_status = "Captura indisponível: " + build_error;
@@ -297,7 +450,8 @@ void HandleAnalysisCycle()
       UpdatePanel();
       return;
      }
-   bool sent = ValidateAndSendMarketOrder(g_analysis, g_symbol, g_contracts, InpMaxLossPerTrade,
+   bool sent = ValidateAndSendMarketOrder(g_analysis, g_symbol, g_contracts, g_max_loss_per_trade,
+                                          g_max_stop_points, g_round_trip_cost_per_contract,
                                           InpMagicNumber, InpDeviationPoints, g_poll_interval_minutes * 60,
                                           result, ambiguous, execution_error);
    if(!sent)
@@ -342,6 +496,11 @@ int OnInit()
    g_pending_deal_ticket = 0;
    g_contracts = InpInitialContracts;
    g_poll_interval_minutes = InpPollingIntervalMinutes;
+   g_risk_reward_preference = InpRiskRewardPreference;
+   g_max_stop_points = InpMaxStopPoints;
+   g_max_loss_per_trade = InpMaxLossPerTrade;
+   g_round_trip_cost_per_contract = InpRoundTripCostPerContract;
+   g_daily_loss_limit = InpDailyLossLimit;
    string symbol_error;
    if(!ResolveConfiguredSymbol(g_symbol, symbol_error))
       g_status = symbol_error;
@@ -354,7 +513,10 @@ int OnInit()
      }
    if(InpPollingIntervalMinutes < 1 || InpPollingIntervalMinutes > 5)
       g_status = "Intervalo inválido: configure entre 1 e 5 minutos";
-   PanelCreate(g_contracts, g_poll_interval_minutes, g_automation_enabled);
+   PanelCreate(g_contracts, g_poll_interval_minutes, g_automation_enabled,
+               g_risk_reward_preference, g_max_stop_points, g_max_loss_per_trade,
+               g_round_trip_cost_per_contract, g_daily_loss_limit);
+   UpdateDailyRisk();
    UpdatePanel();
    if(!EventSetTimer(MathMax(60, MathMin(300, g_poll_interval_minutes * 60))))
      {
@@ -378,6 +540,7 @@ void OnTick()
 
 void OnTimer()
   {
+   UpdateDailyRisk();
    if(InpUseFixture)
      {
       BuildFixtureAnalysis();
@@ -393,9 +556,44 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
   {
    double requested_volume = g_contracts;
    int requested_interval = g_poll_interval_minutes;
+   string requested_risk_reward = g_risk_reward_preference;
+   double requested_max_stop = g_max_stop_points;
+   double requested_max_loss = g_max_loss_per_trade;
+   double requested_cost = g_round_trip_cost_per_contract;
+   double requested_daily_loss = g_daily_loss_limit;
    bool was_enabled = g_automation_enabled;
-   if(!PanelHandleChartEvent(id, sparam, g_automation_enabled, requested_volume, requested_interval))
+   if(!PanelHandleChartEvent(id, sparam, g_automation_enabled, requested_volume, requested_interval,
+                             requested_risk_reward, requested_max_stop, requested_max_loss,
+                             requested_cost, requested_daily_loss))
       return;
+   bool risk_setting_changed = (id == CHARTEVENT_OBJECT_ENDEDIT &&
+                                (sparam == "ATEA_RR" || sparam == "ATEA_MAX_STOP" ||
+                                 sparam == "ATEA_MAX_LOSS" || sparam == "ATEA_ROUND_TRIP_COST" ||
+                                 sparam == "ATEA_DAILY_LOSS"));
+   if(risk_setting_changed)
+     {
+      g_risk_reward_preference = requested_risk_reward;
+      g_max_stop_points = requested_max_stop;
+      g_max_loss_per_trade = requested_max_loss;
+      g_round_trip_cost_per_contract = requested_cost;
+      g_daily_loss_limit = requested_daily_loss;
+      string risk_error;
+      if(!ValidateRiskPreferences(risk_error))
+        {
+         g_automation_enabled = false;
+         g_status = "Preferência inválida: " + risk_error;
+         PanelSetAutomation(false);
+        }
+      else
+        {
+         g_status = "Preferências de risco atualizadas";
+         RecordEvent("risk_preferences_changed", g_last_request_id,
+                     "rr=" + g_risk_reward_preference + "; max_stop_points=" + DoubleToString(g_max_stop_points, 2) +
+                     "; max_loss=" + DoubleToString(g_max_loss_per_trade, 2) +
+                     "; round_trip_cost=" + DoubleToString(g_round_trip_cost_per_contract, 2) +
+                     "; daily_loss=" + DoubleToString(g_daily_loss_limit, 2));
+        }
+     }
    if(id == CHARTEVENT_OBJECT_ENDEDIT)
      {
       g_contracts = requested_volume;

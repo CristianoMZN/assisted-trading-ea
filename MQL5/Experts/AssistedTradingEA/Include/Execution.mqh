@@ -53,7 +53,9 @@ bool IsPriceOnTick(const double price, const double tick_size)
   }
 
 bool ValidateAndSendMarketOrder(const AnalysisData &analysis, const string symbol, const double volume,
-                                const double max_loss, const ulong magic, const int deviation_points,
+                                const double max_loss, const double max_stop_points,
+                                const double round_trip_cost_per_contract,
+                                const ulong magic, const int deviation_points,
                                 const int max_quote_age_seconds, MqlTradeResult &result,
                                 bool &ambiguous, string &error)
   {
@@ -81,9 +83,11 @@ bool ValidateAndSendMarketOrder(const AnalysisData &analysis, const string symbo
       error = "Negociação algorítmica não está habilitada no terminal/conta";
       return false;
      }
-   if(max_loss <= 0)
+   if(!MathIsValidNumber(max_loss) || max_loss <= 0 ||
+      !MathIsValidNumber(max_stop_points) || max_stop_points <= 0 ||
+      !MathIsValidNumber(round_trip_cost_per_contract) || round_trip_cost_per_contract < 0)
      {
-      error = "Configure perda máxima positiva por operação antes de ativar";
+      error = "Configure perda máxima, stop máximo e custo válidos antes de ativar";
       return false;
      }
 
@@ -164,17 +168,38 @@ bool ValidateAndSendMarketOrder(const AnalysisData &analysis, const string symbo
       return false;
      }
 
-   double estimated_profit = 0.0;
-   if(!OrderCalcProfit(order_type, symbol, volume, market_price, analysis.stop_loss, estimated_profit))
+   double actual_stop_points = actual_risk / point;
+   if(actual_stop_points > max_stop_points + 0.000001)
+     {
+      error = StringFormat("Stop atual %.2f pontos excede limite %.2f pontos",
+                           actual_stop_points, max_stop_points);
+      return false;
+     }
+
+   double stop_profit = 0.0;
+   if(!OrderCalcProfit(order_type, symbol, volume, market_price, analysis.stop_loss, stop_profit))
      {
       error = StringFormat("Não foi possível estimar a perda no stop (%d)", GetLastError());
       return false;
      }
-   double estimated_loss = MathAbs(estimated_profit);
+   double total_cost = round_trip_cost_per_contract * volume;
+   double estimated_loss = MathAbs(stop_profit) + total_cost;
    if(estimated_loss > max_loss)
      {
       error = StringFormat("Perda estimada %s excede limite configurado %s",
                            DoubleToString(estimated_loss, 2), DoubleToString(max_loss, 2));
+      return false;
+     }
+   double estimated_target_profit = 0.0;
+   if(!OrderCalcProfit(order_type, symbol, volume, market_price, analysis.take_profit, estimated_target_profit))
+     {
+      error = StringFormat("Não foi possível estimar o retorno no alvo (%d)", GetLastError());
+      return false;
+     }
+   double net_expected_reward = estimated_target_profit - total_cost;
+   if(net_expected_reward <= 0)
+     {
+      error = "Custos de ida e volta eliminam o retorno esperado";
       return false;
      }
 

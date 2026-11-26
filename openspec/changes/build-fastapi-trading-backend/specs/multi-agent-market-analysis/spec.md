@@ -40,7 +40,7 @@ A etapa de decisão SHALL usar a chave OpenRouter fornecida pelo próprio operad
 - **THEN** o backend retorna indisponibilidade sem criar recomendação de compra ou venda
 
 ### Requirement: Decisão final é validada deterministicamente
-Antes de responder ao EA, o backend SHALL validar direção, preços, tick size, limite máximo de stop, relação risco-retorno escolhida, perda estimada por operação, custo informado e retorno líquido esperado.
+Antes de responder ao EA, o backend SHALL validar direção, preços, tick size, limite máximo de stop, relação geométrica risco-retorno escolhida, perda estimada por operação, custo informado e retorno líquido esperado. A relação 1:2 ou 1:3 SHALL corresponder exatamente às distâncias de preço entrada-stop e entrada-alvo, com tolerância de um tick; custos SHALL compor a perda estimada e o retorno líquido esperado SHALL permanecer positivo após custos.
 
 #### Scenario: Sinal passa pelas regras operacionais
 - **WHEN** a direção e os níveis propostos respeitam as preferências e regras do instrumento

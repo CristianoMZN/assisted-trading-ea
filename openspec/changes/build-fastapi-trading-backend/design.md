@@ -31,6 +31,7 @@ O EA MQL5 já coleta snapshots M5 e conversa com um contrato versionado, mas nã
 
 - O request inclui preferência de RR (1:2 ou 1:3), stop máximo em pontos, risco máximo por operação em moeda da conta e custo estimado de ida e volta por contrato. O serviço de risco usa propriedades do símbolo e snapshot para criar níveis candidatos, depois rejeita qualquer nível que viole uma preferência.
 - O backend estima perda com a convenção de tick size/tick value do instrumento e o custo informado; o EA recalcula a perda com as propriedades atuais do símbolo antes da execução. Divergência ou dados indisponíveis bloqueiam a ordem.
+- A relação risco-retorno declarada descreve a geometria dos preços e permanece exatamente 1:2 ou 1:3 dentro de um tick. O custo de ida e volta é aplicado separadamente ao cálculo monetário: entra na perda estimada e precisa deixar retorno esperado líquido positivo, sem alterar a distância geométrica do alvo.
 - A resposta `no_signal` contém `reason_code` estável e uma mensagem curta adequada ao painel. Respostas de compra/venda mantêm os campos existentes de entrada, stop, alvo e RR, acrescentando correlação e metadados de evidência/versão sem expor raciocínio privado.
 - A mudança atualiza `contracts/backend-v1.md` e o validador de contrato junto dos tipos MQL5, evitando uma janela em que servidor e EA interpretem payloads diferentes. A versão do contrato permite rejeitar clientes incompatíveis com clareza.
 

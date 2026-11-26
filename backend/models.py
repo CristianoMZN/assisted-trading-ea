@@ -19,6 +19,7 @@ class AnalysisRecord(Base):
     logical_symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     broker_symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
+    request_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     decision: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     reason_code: Mapped[str | None] = mapped_column(String(96), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
