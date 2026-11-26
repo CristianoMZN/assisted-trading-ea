@@ -55,11 +55,14 @@ Na raiz do repositório, crie o ambiente Python, instale dependências, aplique 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+chmod 600 .env
+# Edite .env e configure os modelos dos agentes e OPENROUTER_API_KEY
 .venv/bin/alembic upgrade head
 .venv/bin/python -m backend
 ```
 
-Consulte `GET /health` e configure `InpBackendUrl` como `http://127.0.0.1:9000/v1/analyze` (ou o endereço/porta configurados). O terminal MT5 precisa permitir essa URL em **Ferramentas → Opções → Expert Advisors**. Para habilitar decisões, configure `OPENROUTER_MODEL` e salve a chave OpenRouter cifrada no cofre do sistema operacional; se o cofre não estiver disponível, `OPENROUTER_API_KEY` é lida do ambiente e não é persistida. `NEWS_RSS_URLS` aceita até cinco feeds HTTPS. Veja [backend/README.md](backend/README.md) para variáveis, erros e detalhes da persistência.
+Consulte `GET /health`; `InpBackendUrl` já vem preenchido com `http://127.0.0.1:9000/v1/analyze` e pode ser alterado nas propriedades do EA se necessário. O terminal MT5 precisa permitir `http://127.0.0.1:9000` em **Ferramentas → Opções → Expert Advisors**. Configure no `.env` local um modelo para `OPENROUTER_MODEL_TECHNICAL_INTERPRETATION` e outro para `OPENROUTER_MODEL_DECISION`, além da chave OpenRouter; esse arquivo é ignorado pelo Git. `NEWS_RSS_URLS` aceita até cinco feeds HTTPS. Veja [backend/README.md](backend/README.md) para variáveis, erros e detalhes da persistência.
 
 ## Instalar e importar no MetaTrader 5
 

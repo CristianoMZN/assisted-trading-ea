@@ -39,8 +39,20 @@ def analysis_retention_days() -> int:
     return days
 
 
-def openrouter_model() -> str:
-    return os.getenv("OPENROUTER_MODEL", "").strip()
+def openrouter_model(agent: str = "decision") -> str:
+    """Return the configured OpenRouter model for an analysis agent.
+
+    OPENROUTER_MODEL remains a compatibility fallback for existing installs.
+    """
+    setting_by_agent = {
+        "technical_interpretation": "OPENROUTER_MODEL_TECHNICAL_INTERPRETATION",
+        "decision": "OPENROUTER_MODEL_DECISION",
+    }
+    try:
+        setting_name = setting_by_agent[agent]
+    except KeyError as exc:
+        raise ValueError(f"Unknown OpenRouter agent: {agent}") from exc
+    return os.getenv(setting_name, "").strip() or os.getenv("OPENROUTER_MODEL", "").strip()
 
 
 def openrouter_timeout_seconds() -> float:

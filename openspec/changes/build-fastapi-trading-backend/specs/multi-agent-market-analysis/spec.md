@@ -31,9 +31,15 @@ A análise técnica SHALL derivar indicadores e condições do snapshot recebido
 ### Requirement: Decisão de modelo usa OpenRouter configurado pelo operador
 A etapa de decisão SHALL usar a chave OpenRouter fornecida pelo próprio operador e um modelo configurado, produzindo apenas a decisão estruturada, confiança calibrada e justificativa curta a partir das evidências fornecidas.
 
+Os agentes de interpretação técnica e decisão SHALL aceitar configurações de modelo independentes. A interpretação técnica SHALL ser executada antes da decisão e fornecida como evidência contextual, sem substituir os indicadores ou as validações determinísticas.
+
 #### Scenario: Decisão recebida do modelo
 - **WHEN** o provedor retorna uma resposta que corresponde ao formato de decisão
 - **THEN** o backend valida e associa a resposta à versão do modelo e dos prompts usados
+
+#### Scenario: Cada agente tem um modelo configurado
+- **WHEN** o operador define modelos para interpretação técnica e decisão
+- **THEN** cada chamada usa o modelo do respectivo agente e registra seus identificadores no resultado persistido
 
 #### Scenario: Chave ausente ou provedor indisponível
 - **WHEN** não há chave configurada ou a chamada não pode ser concluída

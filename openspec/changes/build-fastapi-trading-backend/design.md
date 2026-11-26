@@ -24,7 +24,7 @@ O EA MQL5 já coleta snapshots M5 e conversa com um contrato versionado, mas nã
 
 - Adaptadores isolam fontes jornalísticas, facilitando selecionar e substituir fontes sem mudar a API. Cada evidência conserva origem, horário disponível e estado de coleta.
 - Indicadores são calculados a partir dos candles/ticks recebidos por código reprodutível. O modelo interpreta os valores e as evidências, mas não cria indicadores nem preenche campos ausentes.
-- Prompts dos agentes ficam em arquivos versionados por papel (notícias, técnico quando houver interpretação em linguagem natural, decisão); modelos, limites e parâmetros ficam em configuração. Uma análise registra identificadores de versão e o identificador do modelo escolhido.
+- Prompts dos agentes ficam em arquivos versionados por papel. Interpretação técnica e decisão têm modelos configuráveis de forma independente; coleta de notícias segue determinística nesta versão. Uma análise registra identificadores de versão e o modelo usado por cada agente.
 - A primeira seleção de modelo OpenRouter e das fontes será configurável e avaliada na implementação. A arquitetura não assume que um modelo específico oferece navegação ou ferramenta de busca; coleta externa é responsabilidade explícita dos adaptadores.
 
 ### Risco e contrato do EA
@@ -39,7 +39,7 @@ O EA MQL5 já coleta snapshots M5 e conversa com um contrato versionado, mas nã
 
 - SQLAlchemy isola a aplicação do dialeto do banco; Alembic versiona o esquema. SQLite é o padrão local, escolhido por não exigir serviço separado; `DATABASE_URL` seleciona a conexão. Trocar o URL não garante migração automática de dados: a mudança futura de banco inclui exportação/migração compatível e execução das migrations.
 - Persistem análises e estados necessários à auditoria e recuperação local. Dados temporários e snapshots devem ter retenção configurável para controlar tamanho e exposição.
-- A chave OpenRouter é fornecida pelo operador para sua instalação. Ela é armazenada como segredo cifrado no banco local, com chave de cifragem mantida no armazenamento de credenciais do sistema operacional; não fica no EA, no repositório, no arquivo de configuração em texto puro nem nos logs. Se o SO não oferecer armazenamento de credenciais utilizável, a configuração por variável de ambiente é alternativa explícita, sem persistir a chave em SQLite.
+- A chave OpenRouter é fornecida pelo operador para sua instalação. O operador pode configurá-la no arquivo `.env` local, que é excluído do Git e deve ter permissões restritas, ou armazená-la cifrada no banco local com chave de cifragem mantida no armazenamento de credenciais do sistema operacional. O valor do ambiente/`.env` tem precedência sobre a credencial cifrada; a chave nunca fica no EA, em requests ou logs.
 
 ### Limite diário no EA
 

@@ -39,6 +39,14 @@ class FakeProvider:
     def __init__(self, outcome):
         self.outcome = outcome
 
+    async def interpret_technical(self, _context):
+        return {
+            "trend": "bullish",
+            "momentum": "positive",
+            "summary": "Trend and momentum are positive in the supplied indicators.",
+            "model_id": "test/technical-model",
+        }
+
     async def decide(self, _context):
         if isinstance(self.outcome, Exception):
             raise self.outcome
@@ -118,8 +126,10 @@ class AnalysisApiFailClosedTests(unittest.TestCase):
         self.assertEqual(recovered["state"], "actionable")
         self.assertEqual(recovered["decision"]["direction"], "BUY")
         self.assertEqual(len(recovered["evidence"]), len(body["sources"]))
-        model_version = next(item for item in recovered["versions"] if item["component"] == "model")
+        model_version = next(item for item in recovered["versions"] if item["component"] == "decision_model")
         self.assertEqual(model_version["model_id"], "test/model")
+        technical_model_version = next(item for item in recovered["versions"] if item["component"] == "technical_interpretation_model")
+        self.assertEqual(technical_model_version["model_id"], "test/technical-model")
 
     def test_insufficient_snapshot_returns_persisted_no_signal_without_model_call(self):
         request = json.loads((Path(__file__).resolve().parents[1] / "contracts/examples/request-valid.json").read_text())

@@ -27,6 +27,16 @@ DECISION_SCHEMA = {
     },
     "required": ["action", "reference_price", "stop_loss", "take_profit", "risk_reward", "confidence", "scenario"],
 }
+TECHNICAL_INTERPRETATION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "trend": {"type": "string", "enum": ["bullish", "bearish", "sideways", "unclear"]},
+        "momentum": {"type": "string", "enum": ["positive", "negative", "mixed", "unclear"]},
+        "summary": {"type": "string", "maxLength": 240},
+    },
+    "required": ["trend", "momentum", "summary"],
+}
 
 
 class OpenRouterError(RuntimeError):
@@ -65,31 +75,38 @@ class OpenRouterClient:
         api_key_provider: Callable[[], str | None],
         *,
         model: str | None = None,
+        technical_model: str | None = None,
         timeout_seconds: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
         self.api_key_provider = api_key_provider
-        self.model = model if model is not None else openrouter_model()
+        self.model = model if model is not None else openrouter_model("decision")
+        self.technical_model = (
+            technical_model
+            if technical_model is not None
+            else (model if model is not None else openrouter_model("technical_interpretation"))
+        )
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else openrouter_timeout_seconds()
         self.transport = transport
 
-    async def decide(self, context: dict) -> dict:
+    async def _complete(self, context: dict, *, agent: str, model: str, schema: dict, prompt: str, schema_name: str) -> dict:
         api_key = self.api_key_provider()
         if not api_key:
             raise OpenRouterError("provider_key_missing", "OpenRouter credential is not configured.", retryable=False)
-        if not self.model:
-            raise OpenRouterError("model_not_configured", "OPENROUTER_MODEL is not configured.", retryable=False)
+        if not model:
+            setting_name = "OPENROUTER_MODEL_TECHNICAL_INTERPRETATION" if agent == "technical_interpretation" else "OPENROUTER_MODEL_DECISION"
+            raise OpenRouterError("model_not_configured", f"{setting_name} is not configured.", retryable=False)
         body = {
-            "model": self.model,
+            "model": model,
             "temperature": 0,
             "stream": False,
             "messages": [
-                {"role": "system", "content": load_prompt("decision")},
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(context, ensure_ascii=False, allow_nan=False)},
             ],
             "response_format": {
                 "type": "json_schema",
-                "json_schema": {"name": "trading_decision_candidate", "strict": True, "schema": DECISION_SCHEMA},
+                "json_schema": {"name": schema_name, "strict": True, "schema": schema},
             },
         }
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -109,6 +126,41 @@ class OpenRouterClient:
             candidate = json.loads(content) if isinstance(content, str) else content
         except (ValueError, TypeError, KeyError, IndexError):
             raise OpenRouterError("invalid_model_output", "OpenRouter response did not contain structured decision JSON.", retryable=False) from None
-        result = validate_candidate(candidate)
-        result["model_id"] = payload.get("model", self.model)
+        if agent == "decision":
+            result = validate_candidate(candidate)
+        else:
+            result = validate_technical_interpretation(candidate)
+        result["model_id"] = payload.get("model", model)
         return result
+
+    async def interpret_technical(self, context: dict) -> dict:
+        return await self._complete(
+            context,
+            agent="technical_interpretation",
+            model=self.technical_model,
+            schema=TECHNICAL_INTERPRETATION_SCHEMA,
+            prompt=load_prompt("technical_interpretation"),
+            schema_name="technical_interpretation",
+        )
+
+    async def decide(self, context: dict) -> dict:
+        return await self._complete(
+            context,
+            agent="decision",
+            model=self.model,
+            schema=DECISION_SCHEMA,
+            prompt=load_prompt("decision"),
+            schema_name="trading_decision_candidate",
+        )
+
+
+def validate_technical_interpretation(value: Any) -> dict:
+    if not isinstance(value, dict) or set(value) != set(TECHNICAL_INTERPRETATION_SCHEMA["properties"]):
+        raise OpenRouterError("invalid_model_output", "Technical interpretation does not match the required schema.", retryable=False)
+    if value.get("trend") not in ("bullish", "bearish", "sideways", "unclear"):
+        raise OpenRouterError("invalid_model_output", "Technical interpretation contains an unsupported trend.", retryable=False)
+    if value.get("momentum") not in ("positive", "negative", "mixed", "unclear"):
+        raise OpenRouterError("invalid_model_output", "Technical interpretation contains unsupported momentum.", retryable=False)
+    if not isinstance(value.get("summary"), str) or not value["summary"].strip() or len(value["summary"]) > 240:
+        raise OpenRouterError("invalid_model_output", "Technical interpretation summary is missing or too long.", retryable=False)
+    return value

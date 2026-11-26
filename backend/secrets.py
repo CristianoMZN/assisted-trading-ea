@@ -85,24 +85,27 @@ class OpenRouterCredentialStore:
         self.session.commit()
 
     def get(self) -> str | None:
+        # Runtime configuration (including the project .env) takes precedence,
+        # while preserving compatibility with previously saved credentials.
+        configured_key = os.getenv(OPENROUTER_ENV)
+        if configured_key:
+            return configured_key
         record = self.session.scalar(select(ProviderCredential).where(ProviderCredential.provider == "openrouter"))
         if record is not None:
             try:
                 return self._fernet(create=False).decrypt(record.encrypted_secret).decode("utf-8")
             except Exception:
-                # A configured environment fallback is explicit and is never persisted.
-                fallback = os.getenv(OPENROUTER_ENV)
-                return fallback or None
-        return os.getenv(OPENROUTER_ENV) or None
+                return None
+        return None
 
     def source(self) -> str:
+        if os.getenv(OPENROUTER_ENV):
+            return "environment"
         record = self.session.scalar(select(ProviderCredential).where(ProviderCredential.provider == "openrouter"))
         if record is not None:
             try:
                 self._fernet(create=False).decrypt(record.encrypted_secret)
                 return "os_keyring"
             except Exception:
-                if os.getenv(OPENROUTER_ENV):
-                    return "environment"
                 return "unavailable"
-        return "environment" if os.getenv(OPENROUTER_ENV) else "missing"
+        return "missing"

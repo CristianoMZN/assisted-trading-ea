@@ -34,3 +34,4 @@
 
 - [x] 6.1 Executar verificações integradas de contrato, análise, persistência, limites e compatibilidade EA/backend; registrar resultados com cenários de resposta válida, `no_signal`, indisponibilidade e limite diário atingido.
 - [x] 6.2 Atualizar documentação operacional e de configuração do projeto; verificar consistência entre README, contrato, nomes de configuração e comportamento implementado.
+- [x] 6.3 Carregar `.env` automaticamente e configurar modelos independentes para interpretação técnica e decisão; executar ambos os agentes no pipeline e persistir a versão de cada modelo.

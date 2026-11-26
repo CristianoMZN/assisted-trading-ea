@@ -1,4 +1,4 @@
-"""FastAPI entry point. Analysis stays fail-closed until its pipeline is configured."""
+"""FastAPI entry point coordinating model agents and deterministic risk checks."""
 
 from __future__ import annotations
 
@@ -94,7 +94,6 @@ async def analyze(payload: dict) -> JSONResponse:
     versions = [
         {"component": name, "version": version}
         for name, version in ANALYSIS_VERSIONS.items()
-        if name in ("technical_indicators", "decision")
     ]
 
     if indicators["status"] != "ready":
@@ -133,12 +132,24 @@ async def analyze(payload: dict) -> JSONResponse:
     client = OpenRouterClient(provider_key)
     context = {"snapshot": payload, "indicators": indicators, "evidence": sources}
     repository = AnalysisRepository(get_session_factory())
+    model_versions = []
     try:
-        candidate = await client.decide(context)
+        technical_interpretation = await client.interpret_technical(context)
+        model_versions.append({
+            "component": "technical_interpretation_model",
+            "version": technical_interpretation["model_id"],
+            "model_id": technical_interpretation["model_id"],
+        })
+        candidate = await client.decide({**context, "technical_interpretation": technical_interpretation})
+        model_versions.append({
+            "component": "decision_model",
+            "version": candidate["model_id"],
+            "model_id": candidate["model_id"],
+        })
     except OpenRouterError as exc:
         fallback = error_payload(request_id, exc.code, exc.message, exc.retryable)
         try:
-            repository.save(payload, fallback, versions=versions, evidence=sources)
+            repository.save(payload, fallback, versions=versions + model_versions, evidence=sources)
             repository.prune()
         except SQLAlchemyError:
             return error_response(request_id, "storage_unavailable", "Local analysis storage is unavailable; apply database migrations and check DATABASE_URL.", True, 503)
@@ -199,7 +210,7 @@ async def analyze(payload: dict) -> JSONResponse:
         repository.save(
             payload,
             result,
-            versions=versions + [{"component": "model", "version": candidate["model_id"], "model_id": candidate["model_id"]}],
+            versions=versions + model_versions,
         )
         repository.prune()
     except SQLAlchemyError:

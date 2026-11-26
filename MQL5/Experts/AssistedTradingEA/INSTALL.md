@@ -7,13 +7,16 @@ Na raiz do repositório:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+chmod 600 .env
+# Edite .env e configure os modelos dos agentes e OPENROUTER_API_KEY
 .venv/bin/alembic upgrade head
 .venv/bin/python -m backend
 ```
 
-O serviço usa `127.0.0.1:9000` por padrão. Configure `InpBackendUrl` para `http://127.0.0.1:9000/v1/analyze` e libere o endereço em **Ferramentas → Opções → Expert Advisors** do terminal. `GET /health` informa as versões do serviço e do contrato. A requisição e resposta seguem `contracts/backend-v1.md` (schema 1.1).
+O serviço usa `127.0.0.1:9000` por padrão, e `InpBackendUrl` já vem preenchido como `http://127.0.0.1:9000/v1/analyze`. Se o backend estiver em outro endereço, altere esse campo nas propriedades do EA. Libere `http://127.0.0.1:9000` em **Ferramentas → Opções → Expert Advisors** do terminal. `GET /health` informa as versões do serviço e do contrato. A requisição e resposta seguem `contracts/backend-v1.md` (schema 1.1).
 
-Para habilitar decisões, defina `OPENROUTER_MODEL` e disponibilize uma chave OpenRouter salva cifrada no cofre do sistema operacional. Se o cofre não estiver disponível, o backend aceita `OPENROUTER_API_KEY` do ambiente sem gravá-la no banco. Os feeds HTTPS opcionais são configurados em `NEWS_RSS_URLS`. Instruções de instalação, configuração, banco, retenção e estados de erro estão em [backend/README.md](../../../backend/README.md).
+Copie `.env.example` para `.env` e informe nele `OPENROUTER_MODEL_TECHNICAL_INTERPRETATION`, `OPENROUTER_MODEL_DECISION` e `OPENROUTER_API_KEY`; os dois agentes podem usar modelos iguais ou diferentes. Esse arquivo é carregado automaticamente pelo backend e migrations, e está excluído do Git. Os feeds HTTPS opcionais também são configurados em `NEWS_RSS_URLS`. Instruções de instalação, configuração, banco, retenção e estados de erro estão em [backend/README.md](../../../backend/README.md).
 
 ## Instalar na instância correta
 
@@ -26,17 +29,31 @@ Para habilitar decisões, defina `OPENROUTER_MODEL` e disponibilize uma chave Op
 
 ## Configurar o EA
 
-- **InpLogicalInstrument:** escolha WIN ou WDO.
-- **InpBrokerSymbol:** informe o nome exato do contrato no broker, incluindo vencimento/sufixo. O EA bloqueia se o nome não corresponder ao instrumento lógico.
-- **InpBackendUrl:** URL HTTP/HTTPS da rota FastAPI que implementa o contrato `contracts/backend-v1.md`.
-- **InpPollingIntervalMinutes:** intervalo inicial de 1 a 5 minutos; também pode ser alterado no campo do painel enquanto o EA está anexado.
-- **InpHttpTimeoutMs:** timeout HTTP, de 250 a 30000 ms.
-- **InpInitialContracts:** quantidade inicial; a quantidade pode ser ajustada no painel e deve respeitar mínimo, máximo e passo do símbolo.
-- **Risco no painel:** escolha RR geométrico 1:2/1:3 e informe stop máximo em pontos, perda máxima por operação, custo de ida e volta por contrato e limite de perda diária, na moeda da conta para valores monetários. Valores inválidos ou zero nos limites obrigatórios bloqueiam a automação.
-- **Limite diário:** agrega P&L realizado e flutuante do Magic ID do EA, incluindo comissão, taxas e swap. Quando o limite é atingido, o EA desliga automação, fecha apenas posições gerenciadas e mantém o bloqueio até o próximo dia do servidor. A automação requer ativação manual novamente.
-- **Estimativa de risco:** backend e EA incluem o custo configurado na perda e exigem retorno líquido positivo após custos. Slippage não está incluído.
-- **InpUseFixture:** use somente para testar a interface. Fixtures nunca podem ligar execução real.
-- **InpLogFileName:** arquivo JSON Lines gravado em `MQL5/Files` da pasta de dados dessa instância.
+| Campo | O que informar | Observação |
+| --- | --- | --- |
+| `InpLogicalInstrument` | `WIN` ou `WDO` | Deve corresponder ao contrato do gráfico. |
+| `InpBrokerSymbol` | Símbolo exato do broker, como `WDOZ26` | Pode ficar vazio para usar o símbolo do gráfico atual. |
+| `InpBackendUrl` | `http://127.0.0.1:9000/v1/analyze` | Use o endereço local do serviço; não um URL de teste como webhook.site. |
+| `InpPollingIntervalMinutes` | 1 a 5 | Intervalo entre snapshots/análises, em minutos. |
+| `InpHttpTimeoutMs` | 250 a 30000 | Tempo máximo de espera pela resposta, em milissegundos. |
+| `InpMaxLossPerTrade` | Perda máxima tolerada por operação | Moeda da conta; inclui o custo de ida e volta configurado. Zero bloqueia a automação. |
+| `InpRiskRewardPreference` | `1:2` ou `1:3` | Razão geométrica entre distância até o stop e até o alvo. |
+| `InpMaxStopPoints` | Distância máxima do stop em pontos MT5 | É medido em `SYMBOL_POINT`, não em ticks. Consulte a conversão abaixo antes de definir. |
+| `InpRoundTripCostPerContract` | Custos totais de entrada + saída por contrato | Moeda da conta; inclua tarifas/comissões aplicáveis. Zero significa que o EA assume custo zero. |
+| `InpDailyLossLimit` | Perda diária máxima tolerada | Moeda da conta; ao atingir, suspende a automação e fecha posições deste Magic ID. |
+| `InpInitialContracts` | Quantidade inicial de contratos | Deve respeitar mínimo, máximo e passo do símbolo; também pode ser ajustada no painel. |
+| `InpMagicNumber` | Identificador numérico deste EA | Mantenha o padrão se só houver uma instância; use outro valor para separar instâncias. |
+| `InpDeviationPoints` | Desvio máximo de execução em pontos MT5 | Tolerância de preço para a execução/fechamento; também depende de `SYMBOL_POINT`. |
+| `InpUseFixture` / `InpFixtureNoSignal` | `false` para uso normal | Fixture é só demonstração e nunca envia ordens reais. |
+| `InpLogFileName` | Nome do arquivo JSON Lines | O padrão grava a auditoria em `MQL5/Files`. |
+
+### Converter pontos e ticks
+
+No MT5, abra a Observação do Mercado, clique com o botão direito em `WDOZ26` e escolha **Especificação**. Confira `Point`, `Tick size` e `Stops level`. O limite em pontos corresponde a `InpMaxStopPoints × Point` de variação de preço. Por exemplo, se `Point=0.001` e `Tick size=0.5`, um tick equivale a 500 pontos; nesse caso, `InpMaxStopPoints=5` permite só 0.005 de preço, menos que um tick, e bloqueará stops válidos. A distância também precisa respeitar o `Stops level` do broker.
+
+Defina `InpMaxLossPerTrade`, `InpDailyLossLimit` e os custos conforme sua conta e sua tolerância de risco; não use valores de exemplo sem conferir o valor do tick e as tarifas do broker. O backend e o EA incluem o custo de ida e volta na perda e exigem retorno líquido positivo. A estimativa não inclui slippage.
+
+O limite diário agrega P&L realizado e flutuante do Magic ID deste EA, incluindo comissão, taxas e swap. Quando o limite é atingido, o EA desliga a automação, fecha apenas posições gerenciadas e mantém o bloqueio até o próximo dia do servidor. A automação requer ativação manual novamente.
 
 No terminal, abra **Ferramentas → Opções → Expert Advisors** e adicione o endereço do backend à lista de URLs permitidas para `WebRequest`. Ative **Negociação algorítmica** no terminal e permita negociação nas propriedades do EA.
 
