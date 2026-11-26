@@ -1,27 +1,28 @@
-# Hopscotch validation of backend contract 1.1
+# Hoppscotch validation of backend contract 1.1
 
-Run migrations and `refresh-macro` from the repository root, using the same `DATABASE_URL` and model settings as the server. Start `.venv/bin/python -m backend`. In Hopscotch, create a `POST` request to `http://127.0.0.1:9000/v1/analyze` with `Content-Type: application/json`.
+## Enviar um snapshot WDO novo a cada clique
 
-Generate a current test body immediately before each POST and paste its JSON into Hopscotch:
+Antes do teste, prepare um contexto macro válido para WDO com `.venv/bin/python -m backend refresh-macro --instrument WDO` e inicie o backend com `.venv/bin/python -m backend`, usando o mesmo `DATABASE_URL`. No Hoppscotch, configure:
+
+1. Método e URL: `POST http://127.0.0.1:9000/v1/analyze`.
+2. **Body**: tipo `application/json`, modo raw, contendo **somente** `<<freshMarketSnapshot>>`, sem aspas nem chaves adicionais.
+3. **Pre-request Script**: cole todo o conteúdo de [`hoppscotch-wdo-pre-request.js`](hoppscotch-wdo-pre-request.js). Edite o objeto `input` no início do script para definir cotação, propriedades do símbolo, quantidade e limites de risco do teste.
+4. Clique **Send**. O script cria um novo `request_id`, `sent_at`, horário da cotação, janela, fluxo e 20 candles M5 antes de cada envio. Confira no request efetivamente enviado que o `request_id` muda e que `sent_at` e `current_quote.timestamp` estão próximos do horário UTC atual.
+
+Não cole no Body um JSON gerado anteriormente. O último `stale_market_snapshot` registrado em 26/11/2026 chegou às `22:45:38 UTC` com `sent_at` e cotação de `22:21:58 UTC`, atraso de 23 minutos e 40 segundos. A requisição foi recebida; o backend a classificou como vencida antes de chamar os agentes. O limite local de 300 segundos não pode aceitar esse corpo antigo.
+
+O script usa preços e candles **sintéticos**: serve para testar o transporte, o contrato e a análise do backend com os parâmetros informados, sem representar mercado ao vivo ou uma recomendação operacional. Se usar dados reais, atualize a cotação e os candles juntos; alterar apenas timestamps torna o snapshot incoerente. O contexto macro é separado e precisa estar válido para WDO. Se ele faltar, a resposta esperada é HTTP 503 `macro_context_unavailable`.
+
+Se ainda aparecer `Snapshot ou cotação venceram antes da análise.`, examine o request enviado, não apenas o texto no editor do Body. Se o Body contiver um UUID/horário antigo ou o literal `<<freshMarketSnapshot>>`, corrija o vínculo do script e remova qualquer variável de request ou coleção com esse mesmo nome que esteja prevalecendo sobre a variável definida pelo script. Se a mensagem disser `durante a análise`, os agentes terminaram após o prazo do snapshot; isso é um caso distinto.
+
+O backend usa `MARKET_SNAPSHOT_MAX_AGE_SECONDS` para limitar a idade de `sent_at` e da cotação, inclusive depois das chamadas dos modelos. O valor padrão é 30 segundos; para testes sintéticos de integração pode ser configurado até 300 segundos no ambiente do processo do backend, seguido de reinício. Isso não aumenta a validade do cache macro. No ambiente local deste projeto, `.env` já contém 300 segundos.
+
+Para gerar JSON pelo terminal em vez do script, use os comandos abaixo e envie o corpo imediatamente. Esse método exige gerar e colar um novo JSON em **cada** POST:
 
 ```bash
 .venv/bin/python -m scripts.hopscotch_snapshot --instrument WDO --broker-symbol WDOZ26 --bid 5422.0 --ask 5422.5
 .venv/bin/python -m scripts.hopscotch_snapshot --instrument WIN --broker-symbol WINZ26 --bid 130000 --ask 130005
 ```
-
-The generated candles and prices are **synthetic transport test data**, not live market evidence or a trading recommendation. Use the actual broker symbol, tick size, tick value and quote from MetaTrader for an operational test. Replace the generated prices and candles accordingly; keep timestamps current and internally consistent. Generate a fresh body for every request because `sent_at` and `current_quote.timestamp` expire after 30 seconds by default.
-
-## Reusable WDO test body
-
-To test the technical and decision agents repeatedly without pasting a new JSON document, configure a Hoppscotch request as follows:
-
-1. Select `POST http://127.0.0.1:9000/v1/analyze` and set the body content type to `application/json`.
-2. In **Pre-request Script**, paste the contents of [`hoppscotch-wdo-pre-request.js`](hoppscotch-wdo-pre-request.js).
-3. In the raw JSON **Body**, enter only `<<marketSnapshot>>` (without quotes). Hoppscotch replaces this variable with the JSON generated immediately before each send.
-
-The script creates a new UUID, UTC `sent_at` and quote timestamps, a coherent seven-day window and tick-flow interval, and 20 recent synthetic M5 candles on every request. The fixed WDO prices and volumes are test data. A snapshot captured this morning remains historical; changing only its `sent_at` would misrepresent the quote and market data. For operational analysis, use a fresh real quote and candles from MetaTrader.
-
-If a response says `Snapshot ou cotação venceram antes da análise.`, compare its `created_at` with the request's `sent_at` and `current_quote.timestamp`: the request arrived after the freshness deadline, before the macro cache or either online agent was used. If it says the data expired `durante a análise`, the technical and decision calls finished after the deadline. For an isolated integration test with synthetic data, restart the backend with `MARKET_SNAPSHOT_MAX_AGE_SECONDS=300 .venv/bin/python -m backend` (maximum 300 seconds). This does not extend the separate macro-cache validity. Keep the 30-second setting for normal operation.
 
 Check `schema_version: 1.1`, the same `request_id`, and valid `created_at`/`expires_at` in every response. For a prepared macro cache, inspect `sources` for `macroeconomic_news` and original `valid_until`, `cache_id`, model and prompt version; compare with the row in SQLite. Test `no_relevant_news` by refreshing with that validated result, and missing/expired cache by using a fresh database or waiting beyond `MACRO_VALIDITY_MINUTES`. Check HTTP 503 `macro_context_unavailable` for missing cache, HTTP 503 for model failure, and HTTP 200 `no_signal` for old snapshots. With a current cache and snapshot, check either validated `actionable` or reasoned `no_signal`. Confirm server logs contain no `macro_news`, web or RSS collection stage during POST and record stage durations for comparison with the earlier baseline.
 
