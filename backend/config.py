@@ -8,7 +8,7 @@ import os
 SERVICE_VERSION = "0.1.0"
 CONTRACT_VERSION = "1.1"
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8000
+DEFAULT_PORT = 9000
 
 
 def server_host() -> str:

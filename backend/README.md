@@ -11,7 +11,7 @@ python3 -m venv .venv
 .venv/bin/python -m backend
 ```
 
-The service version is `0.1.0` and the contract version is `1.1`. It binds to `127.0.0.1:8000` by default. Override the bind address with `BACKEND_HOST`, the port with `BACKEND_PORT`, and the Uvicorn log level with `BACKEND_LOG_LEVEL` (`critical`, `error`, `warning`, `info`, `debug`, or `trace`). `BACKEND_PORT` must be an integer from 1 through 65535.
+The service version is `0.1.0` and the contract version is `1.1`. It binds to `127.0.0.1:9000` by default. Override the bind address with `BACKEND_HOST`, the port with `BACKEND_PORT`, and the Uvicorn log level with `BACKEND_LOG_LEVEL` (`critical`, `error`, `warning`, `info`, `debug`, or `trace`). `BACKEND_PORT` must be an integer from 1 through 65535.
 
 Set environment variables in the shell that launches the service, for example:
 
@@ -52,7 +52,7 @@ Set `OPENROUTER_MODEL` to a model identifier accepted by OpenRouter. `OPENROUTER
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `BACKEND_HOST` | `127.0.0.1` | Bind address. |
-| `BACKEND_PORT` | `8000` | Bind port (1–65535). |
+| `BACKEND_PORT` | `9000` | Bind port (1–65535). |
 | `BACKEND_LOG_LEVEL` | `info` | Uvicorn log level. |
 | `DATABASE_URL` | `sqlite:///./data/assisted_trading.db` | Local SQLAlchemy database. |
 | `ANALYSIS_RETENTION_DAYS` | `30` | Retention period (1–3650 days). |

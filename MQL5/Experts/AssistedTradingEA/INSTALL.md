@@ -11,7 +11,7 @@ python3 -m venv .venv
 .venv/bin/python -m backend
 ```
 
-O serviço usa `127.0.0.1:8000` por padrão. Configure `InpBackendUrl` para `http://127.0.0.1:8000/v1/analyze` e libere o endereço em **Ferramentas → Opções → Expert Advisors** do terminal. `GET /health` informa as versões do serviço e do contrato. A requisição e resposta seguem `contracts/backend-v1.md` (schema 1.1).
+O serviço usa `127.0.0.1:9000` por padrão. Configure `InpBackendUrl` para `http://127.0.0.1:9000/v1/analyze` e libere o endereço em **Ferramentas → Opções → Expert Advisors** do terminal. `GET /health` informa as versões do serviço e do contrato. A requisição e resposta seguem `contracts/backend-v1.md` (schema 1.1).
 
 Para habilitar decisões, defina `OPENROUTER_MODEL` e disponibilize uma chave OpenRouter salva cifrada no cofre do sistema operacional. Se o cofre não estiver disponível, o backend aceita `OPENROUTER_API_KEY` do ambiente sem gravá-la no banco. Os feeds HTTPS opcionais são configurados em `NEWS_RSS_URLS`. Instruções de instalação, configuração, banco, retenção e estados de erro estão em [backend/README.md](../../../backend/README.md).
 

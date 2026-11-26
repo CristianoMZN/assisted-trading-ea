@@ -44,7 +44,7 @@ O EA não calcula indicadores nem consulta provedores diretamente, e não envia 
 - Período de coleta: M5, janela móvel fixa de sete dias.
 - Estratégias de risco-retorno geométricas aceitas: 1:2 ou 1:3, selecionadas no painel e preservadas dentro de um tick.
 - Fontes de notícias são configuradas no backend por `NEWS_RSS_URLS`; mercado de previsão permanece como `not_relevant` sem integração configurada.
-- O backend escuta em `127.0.0.1:8000` por padrão. Endpoint e timeout HTTP são configuráveis no EA; intervalo de polling é configurável de 1 a 5 minutos.
+- O backend escuta em `127.0.0.1:9000` por padrão. Endpoint e timeout HTTP são configuráveis no EA; intervalo de polling é configurável de 1 a 5 minutos.
 - Boleta: direção, quantidade ajustável, entrada a mercado, stop loss e take profit retornados pelo backend.
 - Limites: propriedades de volume/preço e tick do broker, stop máximo, perda e custo por operação e perda diária definidos pelo cliente.
 
@@ -59,7 +59,7 @@ python3 -m venv .venv
 .venv/bin/python -m backend
 ```
 
-Consulte `GET /health` e configure `InpBackendUrl` como `http://127.0.0.1:8000/v1/analyze` (ou o endereço/porta configurados). O terminal MT5 precisa permitir essa URL em **Ferramentas → Opções → Expert Advisors**. Para habilitar decisões, configure `OPENROUTER_MODEL` e salve a chave OpenRouter cifrada no cofre do sistema operacional; se o cofre não estiver disponível, `OPENROUTER_API_KEY` é lida do ambiente e não é persistida. `NEWS_RSS_URLS` aceita até cinco feeds HTTPS. Veja [backend/README.md](backend/README.md) para variáveis, erros e detalhes da persistência.
+Consulte `GET /health` e configure `InpBackendUrl` como `http://127.0.0.1:9000/v1/analyze` (ou o endereço/porta configurados). O terminal MT5 precisa permitir essa URL em **Ferramentas → Opções → Expert Advisors**. Para habilitar decisões, configure `OPENROUTER_MODEL` e salve a chave OpenRouter cifrada no cofre do sistema operacional; se o cofre não estiver disponível, `OPENROUTER_API_KEY` é lida do ambiente e não é persistida. `NEWS_RSS_URLS` aceita até cinco feeds HTTPS. Veja [backend/README.md](backend/README.md) para variáveis, erros e detalhes da persistência.
 
 ## Instalar e importar no MetaTrader 5
 

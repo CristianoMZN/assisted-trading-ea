@@ -3,9 +3,7 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-
-from backend.database import Base, database_url
+from backend.database import Base, database_url, make_engine
 from backend import models  # noqa: F401
 
 
@@ -24,15 +22,14 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
-        with context.begin_transaction():
-            context.run_migrations()
+    connectable = make_engine(database_url())
+    try:
+        with connectable.connect() as connection:
+            context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+            with context.begin_transaction():
+                context.run_migrations()
+    finally:
+        connectable.dispose()
 
 
 if context.is_offline_mode():
